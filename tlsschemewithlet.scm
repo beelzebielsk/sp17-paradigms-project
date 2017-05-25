@@ -1,18 +1,47 @@
-; CSc 335
-; Adding let to the interpreter of chapter 10
+; Project Notes: {{{ ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; Project Steps:
+; - Basic TLS Scheme implementation of continuations.
+; - Conversion of TLS Scheme to CPS style.
+;		- Relates to implementing continuations, because if we have them,
+;		   then it seems that this is how functions should be implemented.
+; - Implementing continuations fully, making them fully transparent.
+;		- We sorta cheated with our first way. It was just a stepping stone.
+;		   Ultimately, we didn't make continuations any more transparent
+;		   than they were with underlying Scheme. They're still opaque. To
+;		   really implement them, we have to create a value that holds
+;		   information about program state: where to jump in the program,
+;		   handling the jump, and perhaps handling some memory concerns.
+;		   Continuations should be a TLS scheme value, and not just the
+;		   underlying scheme continuation.
+;		- Figure out what information we'd need to create this value.
+;		- Figure out how to represent that information in the underlying
+;		   scheme "virtual machine".
+;		- Figure out how to use/apply those values (ie how would we shift
+;		   around in a TLS scheme program? What's a jump in TLS Scheme?)
 
+; Basic Continuations: What have we done
+; - Adding a continuation type, because primitive is not appropriate for
+;   it. The second value of a primitive is an atom, which is the name of
+;   some underlying scheme function. The second value that we placed,
+;   originally is a continuation, so the cond of apply-primitive falls
+;   through to the bottom and nothing happens.
+;   - We have to make a third type: continuation. It'll look a lot like
+;     a primitive: (list (quote continuation) some-cont)
+;   - Evaluating it will be farily similar to a primitive: we pass in
+;     the argument to it and call it, much like a primitive function.
+; - Adding a 'begin' special form, which will allows us to evaluate
+;   expressions one after the other. I'm not sure if this will exactly
+;   match the R5RS implementation of `begin`. The only thing that I
+;   require of it now is:
+;   - Statements are evaluated, one after the other
+;   - The value of the final statement is the overall meaning of the
+;     'begin'.
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; }}} ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-; the complete modified interpreter
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-; tls-scheme, from chapter 10 of tls, with let added
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
+(define call/cc call-with-current-continuation)
+(define print-line (lambda (x) (display x) (newline)))
 
 ; auxiliary functions
 
@@ -30,10 +59,7 @@
   (lambda (x)
     (and (not (pair? x)) (not (null? x)))))
 
-
-
-; environments implemented as tables
-
+; Environment Manipulation Functions: {{{ ;;;;;;;;;;;;;;;;;;
 
 (define lookup-in-table
   (lambda (name table table-f)
@@ -80,10 +106,7 @@
 (define values
   (lambda (entry) (cadr entry)))
 
-
-
-
-; the top level of the interpreter
+; }}} ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define value
   (lambda (e)
@@ -94,10 +117,6 @@
   (lambda (e table)
     ((expression-to-action e) e table)))
 
-
-; supporting functions for the intepeter
-
-; syntax-directed dispatch on expression
 
 (define expression-to-action
   (lambda (e)
@@ -121,6 +140,7 @@
       ((eq? e (quote add1)) *const)
       ((eq? e (quote sub1)) *const)
       ((eq? e (quote number?)) *const)
+			((eq? e (quote call/cc)) *const)
       (else *identifier))))
 
 
@@ -141,8 +161,6 @@
          (else *application)))
       (else *application))))
 
-
-; operational semantics -- the definitions of the action functions
 
 (define *const
   (lambda (e table)
@@ -178,28 +196,17 @@
            (cons table (cdr e)))))
 
 
-;; let modification
-
 (define *let
   (lambda (e table)
     (let ((associated-lambda-exp 
            (lambda-from-let e)))
       (meaning associated-lambda-exp table))))
 
-;; 
-
-
-
 (define table-of first)
 
 (define formals-of second)
 
 (define body-of third)
-
-
-; cond is a special form that takes any number of 
-; cond-lines ...  if it sees an else-line, it treats
-; that cond-line as if its question part were true.
 
 (define evcon
   (lambda (lines table)
@@ -224,15 +231,11 @@
 
 (define answer-of second)
 
-
-
 (define *cond 
   (lambda (e table)
     (evcon (cond-lines-of e) table)))
 
 (define cond-lines-of cdr)
-
-
 
 (define evlis
   (lambda (args table)
@@ -254,8 +257,9 @@
 
 (define arguments-of cdr)
 
-
-
+(define continuation?
+	(lambda (l)
+		(eq? (first l) (quote continuation))))
 
 (define primitive?
   (lambda (l)
@@ -275,7 +279,18 @@
         (second fun) vals))
       ((non-primitive? fun)
        (apply-closure
-        (second fun) vals)))))
+        (second fun) vals))
+			((continuation? fun)
+			 ; We could get the value here, directly, but the actual way of
+			 ; using continuations could change later, and it would break the
+			 ; pattern established with the other ways that applications
+			 ; happen.
+			 ; Right now, the value of a continuation is the value of an
+			 ; underlying scheme continuation, but it could eventually become
+			 ; a TLS Scheme value, of the form:
+			 ;	'(continuation (state information))
+			 (apply-continuation
+				(second fun) vals)))))
 
 
 (define apply-primitive
@@ -299,6 +314,12 @@
        (add1 (first vals)))
       ((eq? name (quote sub1))
        (sub1 (first vals)))
+			((eq? name (quote call/cc))
+			 (call/cc (lambda (continuation)
+									(print-line (first vals))
+									; first vals: first argument
+									; second (first vals): The closure object
+									(apply-closure (second (first vals)) (list (build (quote primitive) continuation))))))
       ((eq? name (quote number?))
        (number? (first vals))))))
 
@@ -323,26 +344,24 @@
                vals)
               (table-of closure)))))
 
+; There should only ever be one argument to a continuation.
+(define apply-continuation
+	(lambda (continuation vals)
+		(continuation (first vals))))
 
-;;;;;;;
-
-; auxilliary functions for let
+; Let Auxillary Functions: {{{ ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define let-vars
   (lambda (e) 
     (map car (cadr e))))
 
-
 (define let-vals
   (lambda (e)
     (map cadr (cadr e))))
 
-
 (define let-body
   (lambda (e)
     (caddr e)))
-
-
 
 (define lambda-from-let
   (lambda (e)
@@ -352,126 +371,43 @@
       (let-vars e)
       (let-body e))
      (let-vals e))))
-
-;;;;;;;;;;;;;;;;;;
-
-(define sample-let-exp-1
-  (quote (let ((x 2) (y 3))
-           (cons x y))))
-
-(define sample-let-exp-2
-  (quote (let ((x 2) (y 3))
-           (let ((w 4) (x 5))
-             (cons w (cons x y))))))
-
-
-
-; optional -- requires PrettyBig language in DrRacket
-
-(require (lib "trace.ss"))
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-; try some simple computations to start:
-
-;; (value '7)
-
-;; (value '(add1 6))
-
-;; (value '(cons (quote x) (quote ()))
-
-;; (value '(cons x (quote ())) ) -- for an error
-
-;; (value '((lambda (x) (add1 x)) 3))
-
-;; (value '((lambda (x) (add1 x)) 
-;;          ((lambda (x) (add1 x)) 4)))
-
-;; (value '(((lambda (y)
-;;            (lambda (x) (cons x y)))
-;;          3)
-;;         4))
-
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+; }}} ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(print-line
+	((lambda (function lst e) ; Combinator Wrapper
+		(function function lst e #f))
+		(lambda (F lst e cont)
+			(cond ((null? lst) (cond ((cont) (cont 0))
+															(else (quote ()))))
+						((eq? (car lst) e) (call/cc (lambda (stop)
+																					(F F (cdr lst) e stop)))
+															(cdr lst))
+						(else (cons (car lst) (F F (cdr lst) e cont)))))
+		'(1 5 2 5 3 5 4 5)
+		5))
+
+(display
+	(value '(((lambda (function lst e) ; Combinator Wrapper
+	(function function lst e #f))
+	(lambda (F lst e cont)
+		(cond ((null? lst) (cond ((cont) (cont 0))
+														 (else (quote ()))))
+					((eq? (car lst) e) (call/cc (lambda (stop)
+																				(F F (cdr lst) e stop)))
+														 (cdr lst))
+					(else (cons (car lst) (F F (cdr lst) e cont)))))
+	'(1 5 2 5 3 5 4 5)
+	5)))) (newline)
+
+(non-primitive 
+	(
+	 (
+		((f lst e cont) 
+			((non-primitive (() (f lst e cont) (cond ((null? lst) (cond ((cont) (cont 0)) (else (quote ())))) ((eq? (car lst) e) (call/cc (lambda (stop) (f f (cdr lst) e stop))) (cdr lst)) (else (cons (car lst) (f f (cdr lst) e cont)))))) 
+			 (5 2 5 3 5 4 5) 
+			 5 
+			 #f)))
+	 (stop) 
+	 (f f (cdr lst) e stop)
+	 )
+)
