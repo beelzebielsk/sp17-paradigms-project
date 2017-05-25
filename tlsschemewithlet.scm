@@ -162,6 +162,8 @@
       ((eq? e (quote sub1)) *const)
       ((eq? e (quote mul)) *const)
       ((eq? e (quote add)) *const)
+      ((eq? e (quote <)) *const)
+			((eq? e (quote print-line)) *const)
       ((eq? e (quote number?)) *const)
       ((eq? e (quote call/cc)) *const)
       (else *identifier))))
@@ -360,8 +362,12 @@
        (zero? (first vals)))
       ((eq? name (quote add1))
        (add1 (first vals)))
+      ((eq? name (quote print-line))
+       (print-line (first vals)))
       ((eq? name (quote sub1))
        (sub1 (first vals)))
+      ((eq? name (quote <))
+       (< (first vals) (second vals)))
       ; In a better version of this, here is where we would kick off the
       ; creation of a continuation. At this point, we'd probably extract
       ; a program counter, and probably some environment information.
@@ -528,3 +534,34 @@
       '(1 5 2 5 3 5 4 5)
       5)))
 
+; Verification to see that TLS Scheme continuations can resurrect a
+; chain of deferred function call, just as they can in typical scheme.
+(value
+	'((lambda (x) ; The make-print-sequence wrapper
+			((lambda (y) ; The thing to do with the value of the print-continuation.
+				 ; Verifies that the continuation is actually saved by doing
+				 ; something before the continuation gets used.
+				 (begin  
+					 (print-line 'about-to-use-continuation)
+					 (y 0)))
+			 ; This is a combinator. It's output is the output from the recursive
+			 ; function, which is a continuation, and that continuation will
+			 ; become y.
+			 ((lambda (function arg)
+					(call/cc (lambda (cont) (function function arg cont))))
+				; Recursive function.
+				(lambda (F arg quick-exit)
+					(begin 
+						(cond ((< arg 10) (F F (add arg 1) quick-exit))
+									(else (call/cc (lambda (come-back) (quick-exit come-back)))))
+						(print-line arg)
+						; This isn't just some flourish. The way that the function
+						; is written, once the continuation is called, the function
+						; will finish up, and when it does, it should return a
+						; function to bind to the parameter 'y' (which was initially
+						; the continuation). If there's no function, there's an
+						; error, so on a normal return, this just finishes up the
+						; function.
+						(lambda (x) 'and-we-finish)))
+				x))) ; arg argument to the combinator.
+		0))
