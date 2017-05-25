@@ -1,0 +1,12 @@
+(define call/cc call-with-current-continuation)
+((lambda (function lst e) ; Combinator Wrapper
+	(function function lst e #f))
+	(lambda (F lst e cont)
+		(cond ((null? lst) (cond ((cont) (cont 0))
+														 (else (quote ()))))
+					((eq? (car lst) e) (call/cc (lambda (stop)
+																				(F F (cdr lst) e stop)))
+														 (cdr lst))
+					(else (cons (car lst) (F F (cdr lst) e cont)))))
+	'(1 5 2 5 3 5 4 5)
+	5)
