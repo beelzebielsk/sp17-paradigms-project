@@ -1,3 +1,6 @@
+; The basis of this interpreter is TLS Scheme, with let defined, as
+; given to us in tlsschemewithlet.scm.
+
 ; Project Notes: {{{ ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; Project Steps:
@@ -327,14 +330,16 @@
       ((non-primitive? fun)
        (apply-closure
         (second fun) vals))
-       ; We could get the value here, directly, but the actual way of
-       ; using continuations could change later, and it would break the
-       ; pattern established with the other ways that applications
-       ; happen.
+			 ; We could get the value here, directly, but the actual way of
+			 ; using continuations could change later. With real, by-hand TLS
+			 ; Scheme continuations, applying it to a value will probably
+			 ; require some complicated logic that's best placed in a
+			 ; different function. It would also break the pattern established
+			 ; with the other ways that applications happen.
        ; Right now, the value of a continuation is the value of an
        ; underlying scheme continuation, but it could eventually become
        ; a TLS Scheme value, of the form:
-       ;  '(continuation (state information))
+       ;  '(continuation (R5RS continuation))
       ((continuation? fun)
        ;(print-line 'evaluating-a-continuation:) ;DEBUG
        (apply-continuation
@@ -451,25 +456,6 @@
      (let-vals e))))
 ; }}} ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(print-line
-  ((lambda (function lst e) ; Combinator Wrapper
-     (function function lst e #f))
-   (lambda (F lst e cont)
-     (cond ((null? lst) 
-            (cond ((eq? cont #f) (quote ()))
-                  (else (cont 'was-last))))
-           ((eq? (car lst) e) 
-            (let
-              ((retVal (call/cc (lambda (stop)
-                                  (F F (cdr lst) e stop)))))
-              (cond ((eq? retVal 'was-last)
-                     (cdr lst))
-                    (else
-                      (cons (car lst) retVal)))))
-           (else (cons (car lst) (F F (cdr lst) e cont)))))
-   '(1 5 2 5 3 5 4 5)
-   5))
-
 ; Do we evalaute call/cc to a primitive?
 (print-line
   (value 'call/cc))
@@ -478,42 +464,7 @@
 (print-line
   (value '(call/cc (lambda (c) c))))
 
-; What about when actually using the continuation?
-(print-line
-  (value '(call/cc (lambda (c) (c 10)))))
-
-; What if we mix it with begin?
-(print-line
-  (value '(begin 1 (call/cc (lambda (c) (c 'successful-mix))))))
-
-; Works! Recursion isn't the problem. Perhaps it's building lists
-; recursively that's the problem.
-(print-line 'evaluate-member?)
-(print-line
-  (value 
-    '((lambda (function lst e)
-        (function function lst e))
-      (lambda (F lst e)
-        (cond ((null? lst) #f)
-              ((eq? (car lst) e) #t)
-              (else (F F (cdr lst) e))))
-      '(1 2 3 4)
-      3)))
-
-; This evalutes correctly, too. So it seems that the problem lies with
-; my implementation of continuations.
-(print-line 'evaluate-rember)
-(print-line
-  (value
-    '((lambda (function lst e)
-        (function function lst e))
-      (lambda (F lst e)
-        (cond ((null? lst) '())
-              ((eq? (car lst) e) (cdr lst))
-              (else (cons (car lst) (F F (cdr lst) e)))))
-      '(1 2 3 4)
-      3)))
-
+; remove-last in a form that can be tested in both R5RS and TLS Scheme.
 (print-line
   (value 
     '((lambda (function lst e) ; Combinator Wrapper
@@ -535,7 +486,7 @@
       5)))
 
 ; Verification to see that TLS Scheme continuations can resurrect a
-; chain of deferred function call, just as they can in typical scheme.
+; chain of deferred function calls, just as they can in typical scheme.
 (value
 	'((lambda (x) ; The make-print-sequence wrapper
 			((lambda (y) ; The thing to do with the value of the print-continuation.
