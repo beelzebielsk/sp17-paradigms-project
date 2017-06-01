@@ -32,8 +32,7 @@
 ; - Let/lambda expressions, I'm not sure about. The value of the
 ;   expression is the value of the subexpression, I suppose, but some
 ;   subexpressions have to be evaluated immediately, like the values of
-;   the arguments.
-
+;   the arguments. Chances are, applications should open up new 
 
 ; Constructors/Accessors/Mutators: {{{ ;;;;;;;;;;;;;;;;;;;;;
 
@@ -53,15 +52,67 @@
 		(cond ((eq? val 'True) #t)
 					((eq? val 'False) #f)
 					(else (throw-error)))))
+(define bool-val?
+	(lambda (val)
+		(or (eq? val 'True) (eq? val 'False))))
 
 ;;;;;;;;;; Errors
 ; Force a Scheme error. Will eventually be replaced by causing
 ; Interpreter Errors, which will be handled through continuations.
 (define throw-error
-	(lambda () (car '())))
+	(lambda () 
+		(display "Interpreter error, or area was off-limits.")
+		(newline)
+		(car '())))
+
+;;;;;;;;;; Special Continuations
+(define end-cont 
+	(lambda (value)
+		(display "The value of the expression was: ")
+		(display value) (newline)
+		(display '(End program)) (newline)))
+
+;;;;;;;;;; Environments
+; The environment is a list of ribs.
+(define empty-environment '())
+(define empty-environment? (lambda (env) (eq? env '())))
+(define top-rib car)
+(define pop-rib cdr)
+(define rib-names car)
+(define rib-values cadr)
+; Add a new rib to the environment.
+(define extend-environment
+	(lambda (names vals environment)
+		(cons (list names vals) environment)))
+; Look up a name in the top rib, or in the rest of the ribs.
+(define lookup-in-environment
+	(lambda (name environment)
+		(cond ((empty-environment? environment) (throw-error))
+					(else (lookup-in-rib
+									name
+									(rib-names (top-rib environment))
+									(rib-values (top-rib environment))
+									(lambda () (lookup-in-environment
+															 name
+															 (pop-rib environment))))))))
+
+; Look up a name in a rib, then find the corresponding value.
+(define lookup-in-rib
+	(lambda (name name-list value-list failure-callback)
+		(cond ((null? name-list) (failure-callback))
+					((eq? (car name-list) name) (car value-list))
+					(else (lookup-in-rib
+									name
+									(cdr name-list)
+									(cdr value-list)
+									failure-callback)))))
 
 
 ; }}} ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define value
+	(lambda (expression)
+		(meaning empty-environment expression end-cont)))
 
 ; Meaning needs an expression, a data context for the expression, and a
 ; control context for the expression.
@@ -69,7 +120,11 @@
 ; - Continuations are control contexts.
 ; TODO: Fill this in.
 (define meaning
-	(lambda (environment statement continuation)))
+	(lambda (environment expression continuation)
+		((expression-to-action expression)
+		 environment 
+		 expression 
+		 continuation)))
 
 ; I'm pretty sure that expression-to-action and the action functions
 ; replace the `cases` function, which seems to have the power to both
@@ -91,8 +146,55 @@
 
 ; TODO: Fill this in.
 (define list-to-action
-	(lambda (expression)))
+	(lambda (expression)
+		(let ((first-word (first expression)))
+			(cond ((eq? first-word (quote cond)) *cond)
+						((eq? first-word (quote lambda)) *lambda)
+						((eq? first-word (quote let)) *let)
+						((eq? first-word (quote if)) *if)
+						(else *application)))))
 
 ; TODO: Fill this in.
 (define atom-to-action
-	(lambda (expression)))
+	(lambda (expression)
+		(cond ((number? expression) *const)
+					((bool-val? expression) *const)
+					(else (throw-error)))))
+
+; Action Functions: {{{ ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Gives the meaning of language primitives:
+; - numbers
+; - booleans
+(define *const
+	(lambda (environment expression continuation)
+		(cond ((number? expression) (continuation expression))
+					((bool-val? expression) (continuation (bool-val expression)))
+					(else (throw-error)))))
+
+; Create a continuation 
+(define *cond
+	(lambda (environment expression continuation)
+		(throw-error)))
+
+; Create a continuation 
+(define *if
+	(lambda (environment expression continuation)
+		(throw-error)))
+
+; Create a continuation 
+(define *let
+	(lambda (environment expression continuation)
+		(throw-error)))
+
+; Create a continuation 
+(define *lambda
+	(lambda (environment expression continuation)
+		(throw-error)))
+
+; Create a continuation 
+(define *application
+	(lambda (environment expression continuation)
+		(throw-error)))
+
+; }}} ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

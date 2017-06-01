@@ -214,3 +214,32 @@ You evaluate this starting from the deepest level, which is:
 	link) and the value given to this link, which was 14. The sum is 1 +
 	14 = 15.
 - Return 15.
+
+Are environments bound to continuations? Probably, because the
+conntinuation is built during a call to value-of, which has an
+environment as a parameter, and thus must grab that environment as it's
+own lexically bound environment.
+
+# First Attempt at Building a CPS Interpreter
+
+We don't want the meaning function to build up control contexts. So, for
+one, we might not be tagging data like functions anymore. The knowledge
+of what to do with the function will likely be encoded in the
+continuation, rather than figured out later once all of the expressions
+have been evaluated, then passed to some application function.
+
+I don't have the "cases" function, so the agreement that I will honor
+is:
+
+- The meaning function will not open up new frames for meanings, though
+	new frames may open up as a result of finding the right function to
+	handle the current expression. Either way, the number of frames that
+	will ever open up ought to be finite: the longest path through the
+	`expression-to-action` function to a resulting action function.
+- No action function should open up a new frame, except as a result of
+	looking up variable names. In this case, the number of frames that
+	shall be opened up will be finite: no longer than the number of ribs
+	in the rib-cage environment.
+
+Since the meaning and action functions use a bounded amount of frames,
+they should be *iterative*.
