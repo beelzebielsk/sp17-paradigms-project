@@ -243,3 +243,105 @@ is:
 
 Since the meaning and action functions use a bounded amount of frames,
 they should be *iterative*.
+
+I thought that having environments of arbitrary depth might mean that
+our interpreter builds control context (to an arbitrary degree), and
+that this would break my contract of making the underlying scheme build
+only a finite amount of memory at any one time, however I was wrong on
+several points:
+
+- What matters is that the underlying scheme uses a bounded amount of
+	new continuation frames, not memory. The program could get arbitrarily
+	long, which would break the finite memory contract in a way that
+	doesn't make sense.
+- The lookup functions ultimately are iterative. There's no necessary
+	knowledge of anything that came before when we look through them. We
+	just have calls to lookup in an entry, each of which looks through
+	name/value pairs of the rib in an iterative manner. At the end of each
+	lookup in entry function, we call a callback to lookup in the ribcage
+	with that rib removed. This is, again, iterative, because the result
+	of the callback is the result of the function. There is no need for a
+	new continuation frame.
+- The sorts of calls that would build up continuation frames are things
+	like:
+	- The original `*application`, which evaluated a function, then
+		evaluated the list of arguments to the function, then passed those
+		to an `apply` function. The evaluations necessarily built control
+		context, and could've done so without bound, as each of the
+		expressions to evaluate could've been arbitrarily complicated with
+		subexpressions, and the evaluation of subexpressions required
+		extensions to the control context.
+	- `evlis`, which built a list of meanings from a list of arguments.
+
+I think you end up adding continuation frames when you've got "more
+things to do". Basically, you add a frame when right now is a place that
+you'll eventually return to with a value, but not yet. You don't add a
+frame if you get get a value right now.
+
+Note that there's a difference between extending the data context
+(introducing new bindings) and extending the control context. A
+function call in the meaning function can introduce new bindings in an
+environment, there's nothing wrong with that.
+
+However, the bindings of names have thus far been computing values: the
+meaning of such values were already computed (our interpreter was
+eager). So, forcing the interpeter to evaluate such things would
+completely undermine out building of continuations.
+
+Doing expressions like numbers as not extending the control context was
+not wrong. They shouldn't and the book doesn't make them do so either.
+Because when the number is not an operand, then there is no reason to
+extend control context. That means, that the control context is extended
+when something that is in operand position is located.
+
+# Continuations as a Data Structure
+
+I think continuations are an example of what the book calls *procedural
+data*. Instead of creating functions to deal with datatypes, extracting
+information from them and such, the data structures are functions which
+return the only interesting value to extract from them. The actual data
+is maintained in the function environment, so you leverage the
+function's data structure as your data structure.
+
+I think they can do this precisely when the data type only has
+constructors and a single accessor. If every method of creating certain
+data requires building data (if it's not mutable, pretty much), and
+there's only one thing you'd want to do with the data outside of
+creating something new (one accessor), then you can make the data into
+the accessor function itself and figure out constructors that can
+leverage this, which return new functions out of the old function and a
+few other parameters.
+
+Well, If you think about continuations, you have the continuation itself
+and the continuation builder. The only things you'd want to do with
+continuations is:
+
+- Extend the control context by creating a new continuation out of the
+	current continuation, and packing any required information into the
+	new continuation by way of free variables.
+- Apply an argument to a continuation, causing your function to
+	"return".
+
+The continuations are essentially stacks. Passable stacks. Just as a
+stack keeps track of control context in C/C++, continuations do so too,
+but they maintain the stack in the environment of functions, which can
+be passed around. In C/C++, control context exists outside of statements
+as part of the program's state, and instructions can only modify this
+piece of global program state.
+
+They're stacks because new continuations are added on top of old
+continuations, and the continuation that will get applied first is the
+continuation at the very "top". More in terms of the recursive structure
+of the continuation, the current continuation gets applied to the
+argument, which in turn produces a value, which gets sent to the
+previous continuation (the continuation that was current at the time
+that the current continuation was being created). That order is a LIFO
+order, and thus it might as well be a stack.
+
+# Some of the Book Specific Functions for defining Languages:
+
+- **`cases`**
+	- Found on page 72
+- **`define-datatype`**
+	- Found on page 70
+	

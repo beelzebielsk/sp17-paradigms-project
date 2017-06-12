@@ -9,16 +9,20 @@
 ; To make this good, we should not, in any way, leverage continuations
 ; in the underlying scheme. That means:
 ; - Do not use call-with-current-continuation or call/cc from Scheme.
-; - Do not use any properly recursive calls from underlying scheme, as
-;   the underlying scheme does continuation passing. While the meaning
-;   functions are necessarily recursive (because anything that's not a
-;   simple expression has subexpressions to evaluate, and the process of
-;   evaluating them is the same as the original process), it doesn't
-;   have to be *properly recursive*. Instead of keeping the
-;   interpreter's control context in the underlying scheme, relying on
-;   that to remember how/when to combine values by properly returning
-;   values from recursive function calls, we just add things to be done
-;   in the control context of the interpreter.
+; - Do not use any properly recursive calls from underlying scheme, that
+;   will recurse *with unbounded depth*. The underlying scheme does
+;   continuation passing, so such calls should be avoided where
+;   possible. However, such calls may be necessary, and they aren't
+;   really cheating so long as the context of the interpreter
+;   instructions is not stored within the underlying scheme. The only
+;   context that should be stored in the underlying scheme is control
+;   context that's generated for getting the correct action functions
+;   and such. Such calls will always be of bounded recursion depth.
+;   Instead of keeping the interpreter's control context in the
+;   underlying scheme, relying on that to remember how/when to combine
+;   values by properly returning values from recursive function calls,
+;   we just add things to be done in the control context of the
+;   meaning function.
 
 ; So, what should change control context? What shouldn't?
 ; - Things that can be immediately evaluated, such as primitives,
@@ -193,6 +197,9 @@
 		(throw-error)))
 
 ; Create a continuation 
+; - Do I have to open up a new continuation with each argument that's
+;   evaluated, currying the function to apply to the arguments, one at a
+;   time? Is there a better and not-cheaty way?
 (define *application
 	(lambda (environment expression continuation)
 		(throw-error)))
