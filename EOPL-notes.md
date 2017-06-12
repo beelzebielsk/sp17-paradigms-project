@@ -338,6 +338,12 @@ previous continuation (the continuation that was current at the time
 that the current continuation was being created). That order is a LIFO
 order, and thus it might as well be a stack.
 
+It's the evaluation of *operands* that should cause the expansion of
+control context. Operands only occur when there is an operation.
+Therefore, expansion of control context really ought to occur inside of
+applications, but *not due to the application itself*, but rather the
+evaluation of the operands within that application.
+
 # Some of the Book Specific Functions for defining Languages:
 
 - **`cases`**

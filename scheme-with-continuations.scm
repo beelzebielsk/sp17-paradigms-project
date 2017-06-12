@@ -38,15 +38,22 @@
 ;   subexpressions have to be evaluated immediately, like the values of
 ;   the arguments. Chances are, applications should open up new 
 
+(define print-line
+	(lambda (thing) (display thing) (newline)))
+
 ; Constructors/Accessors/Mutators: {{{ ;;;;;;;;;;;;;;;;;;;;;
 
 ;;;;;;;;;; Constructor/accessors for compound data types.
 (define build-compound list)
-(define first cadr)
-(define second caddr)
-(define third cadddr)
+(define first car)
+(define second cadr)
+(define third caddr)
 ; If calls to 'cons' start appearing within the interpreter, I'm
-; breaking abstraction barriers.
+; breaking abstraction barriers. So I'm defining an abstraction to a
+; 'compound' datatype, which just expresses that the datatype bundles
+; different values together. It's basically just list. The only
+; difference is that there's flexibility in the underlying
+; implementation now.
 (define compound? pair?)
 
 ;;;;;;;;;; Boolean Values
@@ -63,23 +70,37 @@
 ;;;;;;;;;; Errors
 ; Force a Scheme error. Will eventually be replaced by causing
 ; Interpreter Errors, which will be handled through continuations.
+; The 'area was off-limits' is currently temporary. This error is being
+; used in places where functions are defined, but not implemented.
 (define throw-error
 	(lambda () 
 		(display "Interpreter error, or area was off-limits.")
 		(newline)
 		(car '())))
 
+(define make-error
+	(lambda (msg)
+		(lambda ()
+			(print-line msg)
+			(car '()))))
+
+(define error-value-not-found
+	(make-error "Value not found."))
+
 ;;;;;;;;;; Special Continuations
+; This continuation is the final thing to do. It is the absolute
+; smallest control context of any instruction, and any other control
+; context builds upon this. It is pretty much the 'empty continuation'.
 (define end-cont 
 	(lambda (value)
 		(display "The value of the expression was: ")
-		(display value) (newline)
-		(display '(End program)) (newline)))
+		(print-line value)
+		(print-line '(End program))))
 
 ;;;;;;;;;; Environments
 ; The environment is a list of ribs.
 (define empty-environment '())
-(define empty-environment? (lambda (env) (eq? env '())))
+(define empty-environment? (lambda (env) (eq? env empty-environment)))
 (define top-rib car)
 (define pop-rib cdr)
 (define rib-names car)
@@ -91,7 +112,7 @@
 ; Look up a name in the top rib, or in the rest of the ribs.
 (define lookup-in-environment
 	(lambda (name environment)
-		(cond ((empty-environment? environment) (throw-error))
+		(cond ((empty-environment? environment) (error-value-not-found))
 					(else (lookup-in-rib
 									name
 									(rib-names (top-rib environment))
@@ -152,56 +173,198 @@
 (define list-to-action
 	(lambda (expression)
 		(let ((first-word (first expression)))
-			(cond ((eq? first-word (quote cond)) *cond)
+			(cond ((eq? first-word (quote cond))   *cond)
+						((eq? first-word (quote if))     *if)
+						((eq? first-word (quote let))    *let)
 						((eq? first-word (quote lambda)) *lambda)
-						((eq? first-word (quote let)) *let)
-						((eq? first-word (quote if)) *if)
+						((eq? first-word (quote quote))  *quote)
 						(else *application)))))
 
-; TODO: Fill this in.
+; These are the primitives of the language:
+; The two datatypes which are atoms are numbers and booleans.
+; Every other atom is some sort of name. The name either refers to a
+; primitive function, in which case it will be evaluated by *const, or
+; to an identifier in an environment, in which case it will be evaluated
+; by *identifier.
 (define atom-to-action
 	(lambda (expression)
 		(cond ((number? expression) *const)
 					((bool-val? expression) *const)
-					(else (throw-error)))))
+					((eq? '+ expression) *const)
+					((eq? '* expression) *const)
+					((eq? '- expression) *const)
+					((eq? 'expt expression) *const)
+					((eq? 'add1 expression) *const)
+					((eq? 'sub1 expression) *const)
+					((eq? 'cons expression) *const)
+					((eq? 'car expression) *const)
+					((eq? 'cdr expression) *const)
+					((eq? 'list expression) *const)
+					((eq? 'and expression) *const)
+					((eq? 'or expression) *const)
+					((eq? 'not expression) *const)
+					((eq? 'number? expression) *const)
+					((eq? 'null? expression) *const)
+					((eq? 'pair? expression) *const)
+					((eq? 'atom? expression) *const)
+					((eq? 'zero? expression) *const)
+					((eq? 'positive? expression) *const)
+					((eq? 'negative? expression) *const)
+					;((eq? 'call/cc expression) *const) ; Not yet!
+					(else *identifier))))
 
 ; Action Functions: {{{ ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; Gives the meaning of language primitives:
+; These should not create continuations. Primitives do not require
+; extension of control context to evaluate. We either lookup a name, or
+; evaluate a number, or evaluate a boolean, or evaluate a primitive
+; function.
 ; - numbers
 ; - booleans
+; - primitives
 (define *const
 	(lambda (environment expression continuation)
 		(cond ((number? expression) (continuation expression))
 					((bool-val? expression) (continuation (bool-val expression)))
-					(else (throw-error)))))
+					(else (continuation (build-compound 'primitive expression))))))
 
-; Create a continuation 
+; Searches for the name, and fails if it doesn't find it.
+; TODO: Rework this to work with actual error throwing/catching
+; mechanisms. Consider building several continuations and using the
+; appropriate one: an error continuation, a normal (try) continuation.
+; So on and so forth.
+(define *identifier
+	(lambda (environment expression continuation)
+		(continuation (lookup-in-environment expression environment))))
+
+
+; TODO: Create a continuation.
+; This should actually extend the control context, because we should
+; avoid extending control context in underylying scheme as much as
+; possible. The cond consists of, at minimum, a quesiton and answer. The
+; questions should probably extend the control context, and their value
+; -- if any, is the value of the answer, or the value of the rest of the
+;  cond.
+; Another argument as to why it should open up new contexts: if I 
+; create a continuation during a question and return back to it, then
+; wouldn't I expect to go through the rest of the cond expression? I
+; should create these functions with the assumption that *any*
+; sub-expression could be call/cc. That's another way to guide my
+; creation of actions.
+; Answers should not extend the control context, because the value of
+; the answer is the value of the cond. Once we come back with the value,
+; that value will just be the value of the cond.
 (define *cond
 	(lambda (environment expression continuation)
-		(throw-error)))
+		; Remove the 'cond'. Now we just have a list of questions and
+		; answer pairs.
+		(evcon environment (cdr expression) continuation)))
 
-; Create a continuation 
+; This function evaluates the questions/answers of a cond statement.
+; The question is either 'else, or it is an expression. If it is
+; 'else, then the value of the cond statement is the value of the
+; answer. Therefore, evaluate the answer with the continuation given
+; to the cond.
+; If the question is not 'else, then we are not sure what to do.
+; However, if the question would evaluate to true, then we know to
+; return the answer of this question/answer pair. And if the
+; question would not evaluate to true, then we know to evaluate the
+; rest of the cond. Therefore, we create a new continuation, which
+; will eventually receive a value. If this value is true, then we
+; will return the answer, and if the value is not true, then we will
+; return the value of the rest of the cond statement.
+(define evcon
+	(lambda (environment qa-list continuation)
+		(let ((question (caar qa-list)) (answer (cadar qa-list)))
+			(cond ((eq? 'else question)
+						 (print-line "Question was 'else.")
+						 (meaning environment answer continuation))
+						; TODO: Am I duplicating the environment more than necessary
+						; here?
+						(else
+							(meaning 
+								environment 
+								question 
+								(cond-cont 
+									environment 
+									answer 
+									(cdr qa-list) 
+									continuation)))))))
+
+; Returns a new continuation for cond expressions.
+; Required when the question is not 'else. Any other question is
+; technically an operand to the cond, and must be evaluated before
+; continuing to evaluate the cond. Thus, a continuation must be opened
+; which will accept the eventual result of evaluating the question.
+(define cond-cont
+	(lambda (environment answer rest-of-cond old-cont)
+		(lambda (value)
+			(if value
+				(meaning environment answer old-cont)
+				(evcon environment rest-of-cond old-cont)))))
+
+(define if-question
+	(lambda (expr) (cadr expression)))
+(define if-val-when-true
+	(lambda (expr) (caddr expression)))
+(define if-val-when-false
+	(lambda (expr) (cadddr expression)))
+; I'm going to build this through an equivalent cond expression.
+; The syntax should be:
+;		(if question if-true if-false).
+; Thus, this is equivalent to:
+;		(cond ((question if-true) (else if-false)))
 (define *if
 	(lambda (environment expression continuation)
-		(throw-error)))
+		(meaning 
+			environment 
+			(list 
+				'cond 
+				(if-question expression)
+				(if-val-when-true expression)
+				(if-val-when-false expression))
+			continuation)))
 
-; Create a continuation 
+; TODO: Create a continuation 
+; A let with a non-empty a-list has to 'collect a binding', then
+; evaluate the let with the rest of the a-list. A let with an empty
+; a-list is just the value of it's body, in the environment extended by
+; all bindings that it has collected thus far. 
 (define *let
 	(lambda (environment expression continuation)
+		(print-line "Went to *let.")
 		(throw-error)))
 
-; Create a continuation 
+(define lambda-formals
+	(lambda (expression) (cadr expression)))
+(define lambda-body 
+	(lambda (expression) (caddr expession)))
 (define *lambda
 	(lambda (environment expression continuation)
-		(throw-error)))
+		(continuation
+			(build-compound 
+				'non-primitive 
+				(build-compound 
+					environment
+					(lambda-formals expression)
+					(lambda-body expression))))))
 
-; Create a continuation 
+; TODO: Create a continuation 
 ; - Do I have to open up a new continuation with each argument that's
 ;   evaluated, currying the function to apply to the arguments, one at a
 ;   time? Is there a better and not-cheaty way?
+; - The application just kicks off the process. It should evaluate the
+;   function in an extended continuation: one that will know what to do
+;   with a fully evaluated function. The information that's needed to
+;   evaluate a fully evaluated function is the list of actual
+;   parameters. So, this new continuation should evaluate the function
+;   as a primitive, if the value that it gets is a primitive function,
+;   and it should evaluate the function as a non-primiitve if the value
+;   that it gets is a non-primitive function.
 (define *application
 	(lambda (environment expression continuation)
+		(print-line "Went to application.")
 		(throw-error)))
 
 ; }}} ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
