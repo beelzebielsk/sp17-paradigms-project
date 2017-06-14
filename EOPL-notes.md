@@ -344,6 +344,32 @@ Therefore, expansion of control context really ought to occur inside of
 applications, but *not due to the application itself*, but rather the
 evaluation of the operands within that application.
 
+# Proving that my CPS Interpreter "works"
+
+How would I go about proving that a CPS interpreter is equivalent to the
+other interpeters that I've been working with? I'm sure part of the
+answer to this question is the fact that the continuations are an
+inductive data structure. There is a smallest such strucutre, and ways
+of building larger structures from smaller structures. So, how would I
+go about this? I suppose I would start with expressions with a given
+length in the chain of continuations and show that all of those are
+equivalent. I'd start with expressions that open up no new
+continuations: primitives, lambdas (I think that's it. Let forms should
+open up new continuations for evaluating the a-list, and applications
+should open up new continuations for evaluating the operands). Then, we
+investigate expressions whose control context does not exceed n calls.
+What would I need to do here? Would I have to show that the chain of
+calls is both *built correctly* and *terminates correctly*? How would I
+break up building correctly into smaller pieces?
+
+I also need to figure out the exact meaning of 'works'.
+
+- When passed well-formed expressions
+- Accepts some subset of the valid expressions of the underlying scheme?
+	(It's not all of it, but what happens if I decide to extend the
+	underlying scheme? That's a different proof in this situation)
+
+
 # Some of the Book Specific Functions for defining Languages:
 
 - **`cases`**
