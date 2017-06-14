@@ -377,3 +377,226 @@ I also need to figure out the exact meaning of 'works'.
 - **`define-datatype`**
 	- Found on page 70
 	
+# My understanding of continuations after implementing them
+
+They're not too much unlike a stack. I'd go as far as saying that a
+stack is a special case of a continuation.
+
+The continuations hold the "context of control", much like a stack does.
+It holds knowledge of "what to do next", when you're done with the
+current piece.
+
+An interpreter is very recursive, so long as there are any expressions
+which are built out of smaller expressions. Rather than forcing the
+underlying machine to handle all of that recursion explicitly, by
+relying on the underlying machine's method of creating control context
+(which is probably a stack), you explicitly define the control context
+as something called a continuation, and you make that continuation a
+parameter that the interpreter uses.
+
+So, for instance, take the task of evauating the following scheme
+expression:
+
+~~~ {.scheme}
+(cond (#t 0)
+			(#f 1))
+~~~
+
+This is an expression that is built out of several subexpressions.
+To evaluate it, you have to step through a list of question-answer
+pairs, figure out if the question evaluates to true, then return the
+answer.
+
+Normally, from the point of view of the underlying machine on which the
+interpreter is built, you'd do something like:
+
+1. Take the first question and answer pair. Take the question from it.
+2. Evaluate the question, and upon getting the value back, check if the
+	 value was true.
+3. If the value was true, then return the value of the answer.
+	 Otherwise, evaluate the rest of the question-answer pairs.
+
+Here, the underlying machine goes to call the meaning function first,
+while still in the function call that's evaluating the entire cond
+statement. Then, upon getting a value, it takes one of two paths to the
+end of the function call to evaluate the cond. This would be a properly
+recursive call, because all of the state of the current function has to
+be saved, then resumed, upon getting the value from the recursive
+evaluation call for the question.
+
+With continuations and continuation passing, you'd evaluate things like
+this instead.
+
+1. Take the first question and answer pair. Take the question from it.
+2. Rather than making use of the underlying machine's control context to
+	 recursively evaluate the question, you create a new continuation:
+	 - I don't know what the value of the question is, but I know what to
+		 do when I do get the question's value: I should return the value of
+		 the answer if the question's value was true, and evaluate the rest
+		 of the cond otherwise (if there is anything left).
+	 - So, you create a function which does just that: you give it the
+		 answer, and the rest of the cond which might need to get evaluated,
+		 and it produces a new function which takes just one argument: the
+		 value of the question. 
+	 - You issue a recursive evaluation call on the question, just as you
+		 would have done before, but it is no longer properly recursive from
+		 the underlying machine's point of view. The meaning of the cond is
+		 whatever will come out of your new continuation, once the value of
+		 the question gets passed to it. So the underlying machine has
+		 nothing to remember: all of that information of what to do, and
+		 data that's needed to know what to do was placed in the
+		 continuation instead.
+
+There's one thing that I left out. It's more than likely that the cond
+statement was surrounded by other statements. Even if it wasn't, there
+is always a continuation that you start from, which is called the *end
+continuation*, which, when carried out, is the end of the program. So,
+creating new continuations also requires the old continuation.
+
+This is technically like a stack: the environment of the continuation
+functions stores information that the function needs to execute, as well
+as the previous continuation to return a value to, once this
+continuation can create a value. This is basically like a return address
+and function parameters being stored on a stack.
+
+This is nothing special by itself, until you allow these continuations
+to become data that your interpreter can make use of. That's where
+things get strange.
+
+Stacks have to unwind for a program to run properly. Function calls that
+get made have to return.
+
+Here, unwinding is following the chain of created continuations from the
+current continuation to the first continuation (end continuation).
+However, each of the continuations can unwind to that, and so the
+program can end correctly so long as it has a valid continuation.
+
+So giving the language access to continuations is much like giving a C
+program the ability to copy and swap out the stack with other snapshots
+of the stack. You can jump to a stack from an earlier call, thus
+circumventing many function calls. If you maintain continuations that
+different function calls can see, and allow the two different function
+calls to change that continuation, then you can even have access to
+*entirely different stacks*. And since these stack snapshots are values
+in your language, you can pass them to functions. So a function can
+*choose where it returns to*, because it can choose which stack is going
+to be the stack snapshot that's in place when it returns.
+
+Continuations are not a process snapshot, because we're not copying all
+of the memory of a program. The only memory that we're copying in a
+continuation is the state of the stack. No work gets "undone" (unless
+you wrote that work into the stack, in which case, bummer).
+
+While a continuation sort of acts like a jump, that's not truly the
+case. A jump moves a program to a certain line of the program. A jump
+can manuever a program lexically (as in moving to a line of code), but
+it can't maneuver through a program's *time*. You can't jump to a
+previous *function call*, even though you can jump to a function.
+
+Using a continuation can "jump" you to a previous function call,
+however, by moving you to the right line of the function, and then
+reinstating the stack that was around at the time that the continuation
+was created. All the same return addresses are there (in the case of
+Scheme, the continuation still holds the old contiuation in its
+environment, and that old continuation holds its old continuation...,
+and so on until we get to the end continuation).
+
+I say "jump" rather than jump because a normal jump changes what happens
+next by altering a program counter. Using a new continuation is just
+using a different but valid choice for returning to the end
+continuation. It's not a jump in the same way that using a value that's
+alive, but not in the current scope isn't jumping back to the old scope.
+You're just using something from before.
+
+In general, a building a new continuation from an old one is *not
+necessary* if the evaluation of the current expression does not require
+properly recursive calls in the underlying machine. Note that recursive
+calls to meaning are fine, so long as they're not *properly recursive*.
+That means that the meaning call is going to be the return value of the
+current function. That's fine, because then all the information of the
+current function can just be forgotten, and you use the current meaning
+function.
+
+Not using the underlying machine's control context for the evaluation of
+expressions is not about "not cheating" or just some challenge to stroke
+the ego. Any time we depend on it for evaluating the meaning of an
+expression, any information about evaluating that expression is now
+trapped in the underlying machine. To make matters worse, if it
+happened, then our program wouldn't end correctly. It would behave like
+this:
+
+- Save the control context in the underlying machine in a properly
+	recursive call to `meaning`.
+- Proceed with continuations through the rest of the program.
+- Finish evaluating the end continuation.
+- Then, after the program *should have ended*, return *nothing* to the
+	properly recursive function call to `meaning` from the 1st step.
+
+New continuation not necessary:
+
+- primitive data: Evaluating these requires just one call to a defined
+	function in the underlying machine.
+	- numbers
+	- booleans
+	- primitive functions
+- "expression-to-action": Not necessary, because we know that this will
+	return after a finite number of steps, all the time (with a
+	well-formed expression). It's not so much the case that we can't use
+	the control context of the underlying machine *at all*, but just never
+	for the use of evaluating an interpreter expression (calling the
+	`meaning` function).
+- `quote`: Not necessary, because the value of `(quote exp)` is `exp`,
+	which is a value that can be obtained without issuing recursive calls
+	to meaning, at all.
+- `lambda`: Nothing in the lambda form has to be evaluated in order to
+	return a lambda. The return value of a lambda statement is just a
+	re-arrangement of all the information in the lambda statement, along
+	with the current environment from the interpreter.
+
+New continuations necessary:
+
+- `cond`: To figure out the value of a cond statement, we have to figure
+	out the value of the question, *then* figure out the value of
+	something else. There is no way to do this in the underlying machine
+	without being properly recursive. The value from a call to the meaning
+	function is necessary in order to know what how to evaluate the cond.
+	Instead of doing this in the underlying machine, create a new function
+	which contains all of the necessary information for doing the next
+	thing:
+	- The rest of the unevaluated pieces of the cond (the other
+		question-answer pairs)
+	- The answer for the current question you have to evaluate
+	- Where to return the value of the cond (the current continuation).
+
+	That function is a new continuation. It has *extended the control
+	context*.  Then, the last line in the function for evaluating cond is
+	just a call to meaning without anything surrounding it. You evaluate
+	the meaning of the question and pass that meaning into your new
+	continuation which will use that value to decide whether to return the
+	current answer, or evaluate the rest of the cond.
+- `if`: The same case as the cond statement. To find the value of the
+	if, you have to find the value of a question and an one of two
+	answers, which could not be done in the underlying machine alone
+	without a properly recursive call to `meaning`.
+- `applications`: In order to find the value of an application, you have
+	to find the value of all the expressions in a list, then, since the
+	first element of the list should be a function, apply that function to
+	the rest of the list. That requires a properly recursive call, because
+	knowing the value of an applicaiton requires knowing the value of
+	*several* statements first, and then those values have to be combined
+	in some way. Thus, instead of trying to do this recursively in the
+	underying machine, we create a new continuation out of the current one
+	and pack all the information that's needed to figure out what to do
+	next after evaluating the first element of the list of elements in the
+	application:
+	- Give it the old continuation, so that it knows where to return.
+	- Give it all of the other elements from the list that it will have to
+		evaluate (if there are any)
+	- Give it any arguments that you've evaluated so far (if there are
+		any)
+	- Give it the current environment, in case it needs to find another
+		meaning from a thing in the application list (which it probably will).
+
+	You take the burden of remembering what to do when the underlying
+	machine gets the value of the current element of the application list
+	and pack all of that information into a new continuation instead.

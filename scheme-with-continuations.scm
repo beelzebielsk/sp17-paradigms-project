@@ -43,7 +43,14 @@
 
 ; Constructors/Accessors/Mutators: {{{ ;;;;;;;;;;;;;;;;;;;;;
 
+; These are the definitions of datatypes in this language, and methods
+; for changing them, or getting information from them.
+
 ;;;;;;;;;; Constructor/accessors for compound data types.
+; These functions create a data-type for compund data. It's a list, but
+; with these functions, you're free to change the underlying
+; implementation of 'compound' to pairs, or even something totally
+; different if you want.
 (define build-compound list)
 (define first car)
 (define second cadr)
@@ -132,7 +139,7 @@
 (define no-function-of-type
 	(make-error "Function is neither primitive nor non-primitive."))
 
-;;;;;;;;;; Special Continuations
+;;;;;;;;;; Continuations
 ; This continuation is the final thing to do. It is the absolute
 ; smallest control context of any instruction, and any other control
 ; context builds upon this. It is pretty much the 'empty continuation'.
@@ -141,6 +148,22 @@
 		(display "The value of the expression was: ")
 		(print-line value)
 		(print-line '(End program))))
+
+; This creates a continuation value in the interpreter.
+; The continuation that it wraps is a lambda expression from the
+; underlying scheme, but not a continuation.
+(define build-continuation
+	(lambda (continuation)
+		(build-compound 'continuation continuation)))
+; Determines if a value from the interpreter is a continuation from the
+; interpreter.
+(define continuation?
+	(lambda (cont-val)
+		(eq? 'continuation (first cont-val))))
+; Gets the wrapped continuation from a continuation value.
+(define get-cont-val
+	(lambda (val)
+		(second val)))
 
 ;;;;;;;;;; Environments
 ; The environment is a list of ribs.
@@ -218,7 +241,6 @@
 			(list-to-action expression)
 			(atom-to-action expression))))
 
-; TODO: Fill this in.
 (define list-to-action
 	(lambda (expression)
 		(let ((first-word (first expression)))
@@ -237,29 +259,29 @@
 ; by *identifier.
 (define atom-to-action
 	(lambda (expression)
-		(cond ((number? expression) *const)
-					((bool-val? expression) *const)
-					((eq? '+ expression) *const)
-					((eq? '* expression) *const)
-					((eq? '- expression) *const)
-					((eq? 'expt expression) *const)
-					((eq? 'add1 expression) *const)
-					((eq? 'sub1 expression) *const)
-					((eq? 'cons expression) *const)
-					((eq? 'car expression) *const)
-					((eq? 'cdr expression) *const)
-					((eq? 'list expression) *const)
-					((eq? 'and expression) *const)
-					((eq? 'or expression) *const)
-					((eq? 'not expression) *const)
-					((eq? 'number? expression) *const)
-					((eq? 'null? expression) *const)
-					((eq? 'pair? expression) *const)
-					((eq? 'atom? expression) *const)
-					((eq? 'zero? expression) *const)
+		(cond ((number? expression)        *const)
+					((bool-val? expression)      *const)
+					((eq? '+ expression)         *const)
+					((eq? '* expression)         *const)
+					((eq? '- expression)         *const)
+					((eq? 'expt expression)      *const)
+					((eq? 'add1 expression)      *const)
+					((eq? 'sub1 expression)      *const)
+					((eq? 'cons expression)      *const)
+					((eq? 'car expression)       *const)
+					((eq? 'cdr expression)       *const)
+					((eq? 'list expression)      *const)
+					((eq? 'and expression)       *const)
+					((eq? 'or expression)        *const)
+					((eq? 'not expression)       *const)
+					((eq? 'number? expression)   *const)
+					((eq? 'null? expression)     *const)
+					((eq? 'pair? expression)     *const)
+					((eq? 'atom? expression)     *const)
+					((eq? 'zero? expression)     *const)
 					((eq? 'positive? expression) *const)
 					((eq? 'negative? expression) *const)
-					;((eq? 'call/cc expression) *const) ; Not yet!
+					((eq? 'call/cc expression)   *const)
 					(else *identifier))))
 
 ; Action Functions: {{{ ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -441,8 +463,8 @@
 							; interpreted scheme, so it is a compound of the
 							; form ('primitive <atom>).
 							(let ((params-evaled (append params-evaled (list value))))
-								(let ((function (get-func-from-params-evaled params-evaled)))
-											(params (get-params-from-params-evaled params-evaled))
+								(let ((function (get-func-from-params-evaled params-evaled))
+											(params (get-params-from-params-evaled params-evaled)))
 									(apply-func environment function params old-cont))))
 						 ; The value given is the value of the previous argument to
 						 ; be evaluated. There must be at least one, because there
@@ -499,14 +521,18 @@
 
 (define apply-func
 	(lambda (environment function params old-cont)
+		(print-line "Went to apply-func.") ;DEBUG
 		(cond ((primitive? function) 
 					 (apply-primitive environment function params old-cont))
 					((non-primitive? function) 
 					 (apply-nonprimitive environment function params old-cont))
+					((continuation? function)
+					 (apply-continuation environment function params old-cont))
 					(else (no-function-of-type)))))
 
 (define apply-primitive
 	(lambda (environment function params old-cont)
+		(print-line "Went to apply-primitive.") ;DEBUG
 		(let ((func-atom (get-function-value function)))
 		(cond ((eq? func-atom '+) 
 					 (old-cont (+ (first params) (second params))))
@@ -548,17 +574,28 @@
 					 (old-cont  (positive? (first params))))
 					((eq? func-atom 'negative?)
 					 (old-cont  (negative? (first params))))
+					((eq? func-atom 'call/cc)
+					 (let ((lambda-arg (first params)))
+						 (apply-nonprimitive environment 
+																 lambda-arg
+																 (list (build-continuation old-cont))
+																 old-cont)))
 					(else (throw-error))))))
 
 (define apply-nonprimitive
 	(lambda (environment function params old-cont)
+		(print-line "Went to apply-nonprimitive.") ;DEBUG
 		(meaning (extend-environment (lambda-formals function)
 																 params
 																 (lambda-env function))
 						 (lambda-body function)
 						 old-cont)))
-	
-					 
 
+; Continuations may not be called without at least one parameter.
+(define apply-continuation
+	(lambda (environment function params old-cont)
+		(print-line "Went to apply-continuation.") ;DEBUG
+		(let ((actual-cont (get-cont-val function)))
+			(actual-cont (first params)))))
 
 ; }}} ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
