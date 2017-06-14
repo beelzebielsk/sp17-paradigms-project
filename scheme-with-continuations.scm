@@ -356,8 +356,6 @@
 			(cond ((eq? 'else question)
 						 ;(print-line "Question was 'else.") ;DEBUG
 						 (meaning environment answer continuation))
-						; TODO: Am I duplicating the environment more than necessary
-						; here?
 						(else
 							(meaning environment 
 											 question 
@@ -416,7 +414,6 @@
 		(continuation
 			(build-lambda environment expression))))
 
-; TODO: Create a continuation 
 ; - Do I have to open up a new continuation with each argument that's
 ;   evaluated, currying the function to apply to the arguments, one at a
 ;   time? Is there a better and not-cheaty way?
@@ -463,8 +460,10 @@
 							; interpreted scheme, so it is a compound of the
 							; form ('primitive <atom>).
 							(let ((params-evaled (append params-evaled (list value))))
-								(let ((function (get-func-from-params-evaled params-evaled))
-											(params (get-params-from-params-evaled params-evaled)))
+								(let ((function 
+												(get-func-from-params-evaled params-evaled))
+											(params 
+												(get-params-from-params-evaled params-evaled)))
 									(apply-func environment function params old-cont))))
 						 ; The value given is the value of the previous argument to
 						 ; be evaluated. There must be at least one, because there

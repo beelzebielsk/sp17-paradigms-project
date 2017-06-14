@@ -600,3 +600,348 @@ New continuations necessary:
 	You take the burden of remembering what to do when the underlying
 	machine gets the value of the current element of the application list
 	and pack all of that information into a new continuation instead.
+
+# Improved Understanding
+
+## Explaining Continuations relative to Stacks
+
+most of the languages that we use have functions which can return
+values.
+
+For this to work, a program needs to have a *control context*. A control
+context captures the information that's necessary to alter the flow of
+control. In a standard C program, the control context is the stack. The
+stack captures all of the necessary information to be able to say "I
+have to do something else first to get a value, then continue from where
+I left off with that value". In a C function call, the current location of
+the program (the Program Counter) is stored on the stack, then a
+function is called. When the called function is finished, it places a
+return value in a location where the calling function can get it, then
+the program jumps back to the location that was stored on the stack.
+
+In addition to keeping control information on the stack, function
+information is kept on the stack, too, like parameter values.
+
+*Continuations* are another way of describing control context. They
+maintain a place to return to, as well as function information; they're
+not unlike using stacks. I'm not sure how many different ways one can
+implement continuations, but my implementation uses closures. The
+function information and return location are stored in the environment
+of a closure, and the closure itself takes the return value from
+whatever function is called.
+
+So we have something analogous here:
+
+- Agreed upon location to place a return value:
+	- C/C++/stack based compilers/interpreters: Some previously agreed
+		upon location on the stack, or an agreed upon register from the
+		processor.
+	- Continuation Based compilers/interpreters: The return value is
+		passed in as a parameter to a function which represents the control
+		context.
+- Information Stored in both:
+	- Parameter information
+	- Place to return to
+
+When information about control flow needs to be stored in a stack-based
+program, a new frame is created on a stack which includes a return
+address and leaves space for a new function to store parameter
+information. When information about control flow needs to be stored in a
+continuation-based program, a function is created that contains the
+following:
+
+- The current continuation, because when the current action is finished
+	running, it needs to return.
+- Any information the current action would need to finish what it was
+	doing (any variable/parameter values).
+- Information on what to do to produce the correct value once the action
+	of the "called function" would take place. There's *a lot* that's wrong
+	with this previous sentence, but I don't want to delve too far into
+	how continuations and stacks differ yet. The best way to think about
+	this: if, in a normal stack-based language, a function call would
+	return a value to the caller, and the caller would continue on with
+	that value, in a CPS style language, all of the instructions that
+	would come after the function call are moved into a new continuation,
+	along with any of the information those instructions would need to
+	run correctly.
+
+When In much the same way that a stack "unwinds" as values
+are returned to caling functions, one travels up a chain of
+continuations.
+
+## Where They Tend to Differ
+
+Continuations, by themselves, aren't much different than stacks.
+However, the stack is a single, global monolithic data structure that
+everything touches. Continuations, on the other hand, are *values*.
+Building them well typically means creating an interpreter in
+*Continuation Passing Style* (CPS). Much like interpreters from Scheme and
+Scheme-like languages pass around an *environment* (a data structure
+which contains mappings of names to bound values), a CPS interpreter
+also passes around continuations.
+
+There's already a difference here, in that continuations get *passed*
+during the compilation/interpretation of a program, while the stack is
+a global object that is in one place all the time.
+
+Furthermore, continuations differ in when they grow. Continuations only
+grow when there is a need to do something properly recursive: when some
+other course of action has to be completed first before the current
+course of action can be completed *which would not complete the current
+action*. The stack grows with function calls. Continuations don't
+actually grow with function calls. The function will return it's value
+wherever it needs to grow. However, evaluating a function call means
+evaluating a reference to a function, and the function's parameters.
+Each of *those* requires opening a continuation, because the value of a
+function call is not the function's value, nor the value of any of the
+parameters (in general), but a combination of those things. The
+evaluation of the function's body with the actual parameters bound to
+formal paramters doesn't create a new continuation, because this value
+would just go wherever the value of the function call would go; the two
+values are one and the same.
+
+- The evaluation of operands cause the creation of new continuations,
+	not the evaluation of functions.
+- The evaluation of tail call functions do *not* cause the creation of
+	new continuations, because no new control information is necessary.
+	The value of the tail call goes exactly where the value of the
+	function would go, because the value of the tail call is the value of
+	the function.
+
+This is why that sentence that implied that continuations grow with
+function calls is very, very wrong. They only grow when evaluating an
+expression whose value is not the value of the current expression. Doing
+this is necessarily *properly recursive*, because evaluating while
+evaluating is recursive, and because the evaluation of the original
+statement won't be finished after the evaluation of this new statement,
+information needs to be saved on where to come back with the value of
+the new statement.
+
+However, they differ even more because, since a continuation is a value,
+you can allow your language to use these values, in much the same way
+that a language like Scheme has first-class functions. So continuations
+provide a way of cleanly and easily manipulating the control context of
+a program.
+
+Doing something similar in a stack-based program would require
+maintaning copies of the stack, and replacing the existing stack with
+the copy. That could be dangerous, and it certainly wouldn't be easy.
+
+## Implementing Continuations
+
+The language that I created is implemented on top of the high-level
+language R5RS Scheme. The function that evaluates statements is called
+`meaning`. While there is a `value` function defined in the progra which
+is used often, it is just a front-end to meaning. The bulk of
+implementing the continuations is doing two things:
+
+- Altering the `meaning` function to take a continuation as an argument,
+	in addition to an environment and an expression to evaluate.
+- Taking any properly recursive call that the underlying Scheme would
+	make and expressing that call through continuations.
+
+The first and second piece are really all part of the same goal. To give
+the interpreter itself complete control over its control context, you
+have to take all of the information about control flow and make it
+completely accessible to the interpreter you're building. Scheme doesn't
+come with tools for evaluating its control context, so maintaing *any*
+control context in the underlying Scheme machine means locking needed
+information away in a place where the interpreter can't reach it.
+Putting these continatuions into the `meaning` function means they're
+accessible to the meaning function.
+
+### Where Continuations Start
+
+Control contexts ultimately start at the end, because they are LIFO
+structures. When the first stack frame is reached, you are likely at the
+end of the program. Similarly, the first continuation of a program is
+called the *end continuaiton*. It is a function that specifies what to
+do when your program finishes evaluating.
+
+~~~ {.scheme}
+(define end-cont 
+	(lambda (value)
+		(display "The value of the expression was: ")
+		(print-line value)
+		(print-line '(End program))))
+~~~
+
+### When Continuations Grow
+
+In my language I have several different general types of statements:
+
+- Primitive expressions, which are either just a primitive data type
+	(number/boolean), or a primitive function name.
+- Resolution of an identifier, for any name that is not the name of a
+	primitive function.
+- And some 'list forms':
+	- `(quote exp)`
+	- `(cond (q1 a1) ... (qn an))`
+	- `(if question if-true if-false)`
+	- `(lambda (param1, ..., paramn) body)`
+	- `(let ((name1 val1) ... (namen valn)) expression)`
+	- `(function-value arg1 ... argn)`
+
+Primitive expressions, resolutions of identifiers, labmda expressions,
+and quote forms do not require the extension of control context.
+Evaluating these expressions is either a single non-recursive function
+call (or recursive call with finitely many calls, none of which contain
+information about the control flow of the interpreter) from the
+underlying Scheme, or in the case of quote, the value of the expression
+is the expression itself.
+
+However, the `if`, `cond`, `let`, and applications of functions all
+require the use of continuations.
+
+`if` and `cond` are very similar, as are applications and `let`. I will
+cover just one situation from each pair.
+
+### Cond
+
+There are two forms of `cond` which require no extension of control
+context:
+
+- `(cond)`, which produces nothing.
+- `(cond (else exp))`, whose value is just the value of `exp`, and the
+	interpreter will see that.
+
+All other forms of cond will require a continuation, because evaluating
+the `cond` staement means evaluating one of the questions, and then
+doing something based on the value of the question. This is a properly
+recursive function call, and as such, information about this call needs
+to be stored in a continuation. This continuation requires:
+
+- All other question/answer pairs of the `cond`, just in case the value
+	of the first question is false.
+- The answer to evaluate in case the value of the first question is
+	true.
+- The current environment, for evaluating the answer, or to pass to the
+	function that will evaluate the rest of the `cond`.
+- The current continuation, because once this new continuation finishes
+	it's job, it must produce a value to return, and it must return that
+	value wherever the value of the `cond` should have gone.
+
+~~~ {.scheme}
+; The function which states what to do when a cond expression is to be
+; evaluated.
+(define *cond
+	(lambda (environment expression continuation)
+		; Remove the 'cond'. Now we just have a list of questions and
+		; answer pairs.
+		(evcon environment (cdr expression) continuation)))
+
+; The function which states *how* to evaluate a cond expression.
+(define evcon
+	(lambda (environment qa-list continuation)
+		(let ((question (caar qa-list)) (answer (cadar qa-list)))
+			(cond ((eq? 'else question)
+						 ;(print-line "Question was 'else.") ;DEBUG
+						 (meaning environment answer continuation))
+						(else
+							(meaning environment 
+											 question 
+											 (cond-cont environment 
+																	answer 
+																	(cdr qa-list) 
+																	continuation)))))))
+
+; The function for creating new continuations for cond expressions.
+(define cond-cont
+	(lambda (environment answer rest-of-cond old-cont)
+		(lambda (value)
+			(if value
+				(meaning environment answer old-cont)
+				(evcon environment rest-of-cond old-cont)))))
+~~~
+
+### applications
+
+The simplest possible application is `(function-expr)`, which is a
+function call for a function with no arguments. Even this requires a
+continuation.
+
+In order to evaluate the application, the `function-expr` has to be
+evaluated first, then the evalation of the application has to continue.
+Thus, an extension of control context must occur.
+
+If there are arguments to evaluate, then those too must cause expansions
+of control context.
+
+The two situations are essentially the same, because they are all the
+evaluation of expressions, so I use the same continuation building
+function for each. In order to continue evaluating the function, the
+following information is necessary to give to the continuation:
+
+- The value of all the expressions of the application left to evaluate
+	(if there are none, then a value is passed which indicates that; in my
+	implementation, it's the empty list).
+- The value of all the expressions that have been evaluated so far, if
+	there are any. If there are none, then a value is passed which
+	indicates that; In my implementation, that is the empty list. This
+	part is necessary because these continuations for function evaluation
+	essentially collect a list of the evaluated expressions until all of
+	the expressions have been evaluated. The process is done through
+	continuations so that there's no properly recursive function call in
+	the underlying Scheme.
+- The current continuation, because if the application is to be
+	evaluated, it must return its value to the current continuation.
+- The current environment, for evaluating expressions.
+
+~~~ {.scheme}
+(define *application
+	(lambda (environment expression continuation)
+		(print-line "Went to application.") ;DEBUG
+		(meaning environment 
+						 (car expression) ; The function of the application.
+						 (eval-op-cont environment 
+													 (cdr expression) 
+													 (list) 
+													 continuation))))
+
+(define eval-op-cont
+	(lambda (environment remaining-params params-evaled old-cont)
+		(lambda (value)
+			; If there are no remaining parameters to evaluate, then it's time
+			; to move to an application. We have 
+			(cond ((null? remaining-params)
+							; NOTE: function here is a function value from the
+							; interpreted scheme, so it is a compound of the
+							; form ('primitive <atom>).
+							(let ((params-evaled (append params-evaled (list value))))
+								(let ((function 
+												(get-func-from-params-evaled params-evaled))
+											(params 
+												(get-params-from-params-evaled params-evaled)))
+									(apply-func environment function params old-cont))))
+						 ; The value given is the value of the previous argument to
+						 ; be evaluated. There must be at least one, because there
+						 ; has to be at least the function, and I'm not currently
+						 ; giving any special treatment to evaluating the function.
+						 ; This routine of building new eval-op-cont with the same
+						 ; old-cont is a way of performing 'evlis' without building
+						 ; up any control context in the underlying scheme.
+						 (else (meaning environment 
+														(car remaining-params)
+														(eval-op-cont environment
+																					(cdr remaining-params)
+																					(append params-evaled 
+																									(list value))
+																					old-cont)))))))
+
+(define apply-func
+	(lambda (environment function params old-cont)
+		(print-line "Went to apply-func.") ;DEBUG
+		(cond ((primitive? function) 
+					 (apply-primitive environment function params old-cont))
+					((non-primitive? function) 
+					 (apply-nonprimitive environment function params old-cont))
+					((continuation? function)
+					 (apply-continuation environment function params old-cont))
+					(else (no-function-of-type)))))
+~~~
+
+The actual implementations of `apply-primitive`, `apply-nonprimitive`,
+and `apply-continuation` can be found in the source code, but they're
+unimportant to our discussion, because none of them ever create new
+continuations. They can readily evaluate the expression that they need
+to evaluate.
