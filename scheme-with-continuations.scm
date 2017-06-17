@@ -26,20 +26,27 @@
 
 ; So, what should change control context? What shouldn't?
 ; - Things that can be immediately evaluated, such as primitives,
-;   probably shouldn't. They should just be returned immediately to the
-;   current continuation.
-; - Things that have subexpressions probably should, because the meaning
-;   will be determined by the subexpressions. We have to build the
+;   shouldn't. They should just be evaluated and returned immediately to
+;   the current continuation.
+; - Things that have subexpressions whose value cannot be immediately
+;   computed from the subexpressions should, because evaluating the
+;   meaning requires recursive calls to meaning to evaluate the
+;   subexpressions, and we have to transform those calls from properly
+;   recursive calls in the underlying scheme to iterative calls with the
+;   control information placed in a continuation. We have to build the
 ;   meaning of the expression in terms of the values that will come out
 ;   of the subexpressions by building continuations around those
 ;   subexpressions.
-; - Let/lambda expressions, I'm not sure about. The value of the
-;   expression is the value of the subexpression, I suppose, but some
-;   subexpressions have to be evaluated immediately, like the values of
-;   the arguments. Chances are, applications should open up new 
+; - Let/lambda expressions, need continuations because of their
+;   operands, but not for the evaluation of the body itself. 
 
 (define print-line
-	(lambda (thing) (display thing) (newline)))
+	(lambda (thing . things)
+		(cond ((null? things)
+					 (display thing) (newline))
+					(else (display thing)
+								(display " ")
+								(apply print-line things)))))
 
 ; Constructors/Accessors/Mutators: {{{ ;;;;;;;;;;;;;;;;;;;;;
 
@@ -55,6 +62,19 @@
 (define first car)
 (define second cadr)
 (define third caddr)
+(define first?
+	(lambda (compound)
+		(not (null? compound))))
+(define second?
+	(lambda (compound)
+		(cond ((not (first? compound)) #f)
+					(else (first? (cdr compound))))))
+(define third?
+	(lambda (compound)
+		(cond ((not (second? compound)) #f)
+					(else (first? (cddr compound))))))
+
+
 ; If calls to 'cons' start appearing within the interpreter, I'm
 ; breaking abstraction barriers. So I'm defining an abstraction to a
 ; 'compound' datatype, which just expresses that the datatype bundles
@@ -62,6 +82,33 @@
 ; difference is that there's flexibility in the underlying
 ; implementation now.
 (define compound? pair?)
+
+; Most compunds will be used to assign types to data. So this will be
+; the function for checking the type of data. 
+(define compound-tag-check
+	(lambda (comp-obj tag)
+		(cond ((not (compound? comp-obj)) #f)
+					(else (eq? tag (first comp-obj))))))
+
+
+;;;;;;;;;; Association Lists
+;;; I'm using these as something like a struct.
+
+(define a-get
+	(lambda (a-list mbr)
+		(let ((result
+						(letrec
+							((R
+								 (lambda (a-list)
+									 (cond ((null? a-list)
+													(print-line "Can't search empty a-list.")
+													'error)
+												 ((eq? (caar a-list) mbr) (cadar a-list))
+												 (else (R (cdr a-list)))))))
+							(R a-list))))
+			(if (eq? result 'error)
+				(throw-error)
+				result))))
 
 ;;;;;;;;;; Boolean Values
 ; Map from Interpreter Booleans to Scheme Booleans
@@ -111,10 +158,10 @@
 		(second func-val)))
 (define primitive?
 	(lambda (func-value)
-		(eq? 'primitive (first func-value))))
+		(compound-tag-check func-value 'primitive)))
 (define non-primitive?
 	(lambda (func-value)
-		(eq? 'non-primitive (first func-value))))
+		(compound-tag-check func-value 'non-primitive)))
 
 ;;;;;;;;;; Errors
 ; Force a Scheme error. Will eventually be replaced by causing
@@ -123,7 +170,7 @@
 ; used in places where functions are defined, but not implemented.
 (define throw-error
 	(lambda () 
-		(display "Interpreter error, or area was off-limits.")
+		(display "Underlying Scheme error, or area was off-limits.")
 		(newline)
 		(car '())))
 
@@ -133,11 +180,54 @@
 			(print-line msg)
 			(car '()))))
 
-(define error-value-not-found
-	(make-error "Value not found."))
+; This is for errors as objects. Errors that the interpreter will
+; produce, which can be caught and viewed. These will eventually replace
+; throw-error and make-error entirely.
+; The format of every error object should be:
+; 1: 'error
+; 2: some scheme value which holds information about the error.
+; [3]: An optional function which takes just the obj as the value and
+; prints information about the error. If this is not supplied, then the
+; obj will be passed into print-line as its only argument.
+(define build-error
+	(lambda (obj . others)
+		(if (null? others)
+			(build-compound 'error obj)
+			(build-compound 'error obj (car others)))))
 
-(define no-function-of-type
-	(make-error "Function is neither primitive nor non-primitive."))
+(define error?
+	(lambda (obj)
+		(compound-tag-check obj 'error)))
+
+(define print-error
+	(lambda (obj)
+		(print-line "Error Type:" 
+								(a-get obj 'error-type))
+		(print-line "Description:"
+								(a-get obj 'description))))
+(define print-error-value-not-found
+	(lambda (obj)
+		(print-error obj)
+		(print-line "Name looked up:"
+								(a-get obj 'name))))
+; An error for when a value is not bound to a name during lookup.
+(define error-value-not-found
+	(lambda (name)
+		(build-error
+			(build-compound
+				(list 'error-type 'binding-error)
+				(list 'description "Could not find value for name.")
+				(list 'name name))
+			print-error-value-not-found)))
+
+(define error-value-not-function
+	(lambda (not-func-val)
+		(build-error
+			(build-compound
+				(list 'error-type 'application-error)
+				(list 'description 
+							"Tried to apply a non-function value as a function.")
+				(list 'value not-func-val)))))
 
 ;;;;;;;;;; Continuations
 ; This continuation is the final thing to do. It is the absolute
@@ -145,9 +235,15 @@
 ; context builds upon this. It is pretty much the 'empty continuation'.
 (define end-cont 
 	(lambda (value)
-		(display "The value of the expression was: ")
-		(print-line value)
-		(print-line '(End program))))
+		(cond ((error? value)
+					 (print-line "Program hit error.")
+					 (if (third? value)
+						 ((third value) (second value))
+						 (print-error (second value))))
+					(else
+						(display "The value of the expression was: ")
+						(print-line value)
+						(print-line '(End program))))))
 
 ; This creates a continuation value in the interpreter.
 ; The continuation that it wraps is a lambda expression from the
@@ -159,7 +255,7 @@
 ; interpreter.
 (define continuation?
 	(lambda (cont-val)
-		(eq? 'continuation (first cont-val))))
+		(compound-tag-check cont-val 'continuation)))
 ; Gets the wrapped continuation from a continuation value.
 (define get-cont-val
 	(lambda (val)
@@ -181,11 +277,11 @@
 (define lookup-in-environment
 	(lambda (name environment)
 		(cond ((empty-environment? environment) 
-					 (display "The name being looked up: ")
-					 (print-line name)
-					 (display "The environment at the time of lookup: ")
-					 (print-line environment)
-					 (error-value-not-found))
+					 ;(display "The name being looked up: ") ;DEBUG
+					 ;(print-line name) ;DEBUG
+					 ;(display "The environment at the time of lookup: ") ;DEBUG
+					 (print-line environment) ;DEBUG
+					 (error-value-not-found name))
 					(else (lookup-in-rib
 									name
 									(rib-names (top-rib environment))
@@ -249,6 +345,7 @@
 						((eq? first-word (quote let))    *let)
 						((eq? first-word (quote lambda)) *lambda)
 						((eq? first-word (quote quote))  *quote)
+						((eq? first-word (quote try))		 *try)
 						(else *application)))))
 
 ; These are the primitives of the language:
@@ -313,7 +410,7 @@
 ;		(quote exp)
 (define *quote
 	(lambda (environment expression continuation)
-		(continuation expression)))
+		(continuation (second expression))))
 
 
 ; This should actually extend the control context, because we should
@@ -399,15 +496,39 @@
 				(if-val-when-false expression))
 			continuation)))
 
-; TODO: Create a continuation 
-; A let with a non-empty a-list has to 'collect a binding', then
-; evaluate the let with the rest of the a-list. A let with an empty
-; a-list is just the value of it's body, in the environment extended by
-; all bindings that it has collected thus far. 
+; Input: a let expression. Has the form
+;		(let ( (name1 val1) ... (namen valn) ) body)
+; Returns: (name1 ... namen)
+(define let-names
+	(lambda (expression)
+		(map first (second expression))))
+(define let-values
+	(lambda (expression)
+		(map second (second expression))))
+(define let-body third)
+(define let-to-lambda-value
+	(lambda (expression)
+		(build-compound
+			'non-primitive
+			(build-compound environment
+											(let-names expression)
+											(let-body expression)))))
+(define let-to-application
+	(lambda (expression)
+		(append 
+			(list
+				(list 'lambda 
+							(let-names expression) 
+							(let-body expression)))
+			(let-values expression))))
+
 (define *let
 	(lambda (environment expression continuation)
-		(print-line "Went to *let.")
-		(throw-error)))
+		(print-line "Went to *let.") ;DEBUG
+		(print-line (let-to-application expression))
+		(*application environment 
+									(let-to-application expression) 
+									continuation)))
 
 (define *lambda
 	(lambda (environment expression continuation)
@@ -452,33 +573,52 @@
 	(lambda (params-evaled) (cdr params-evaled)))
 (define eval-op-cont
 	(lambda (environment remaining-params params-evaled old-cont)
+		(define action
+			(lambda (environment params-evaled old-cont)
+				(let ((function 
+								(get-func-from-params-evaled params-evaled))
+							(params 
+								(get-params-from-params-evaled params-evaled)))
+					(apply-func environment function params old-cont))))
+		(evlis-cont environment 
+								remaining-params 
+								params-evaled 
+								old-cont
+								action)))
+
+; Replacing the bulk of the logic for eval-op-cont with this, because
+; the need to evaluate a list of expressions before fully evaluating an
+; expression happens more than once.
+; action is a function that takes in: environment params-evaled old-cont
+; and states what to do with all of the evaluated information.
+; TODO: Finish this function
+; TODO: Express eval-op-cont and try-cont in terms of this function.
+(define evlis-cont
+	(lambda (environment remaining-params params-evaled old-cont action)
+		(print-line "Went to evlis-cont.") ;DEBUG
+		(print-line "remaining-params:" remaining-params) ;DEBUG
+		(print-line "params-evaled:" params-evaled) ;DEBUG
 		(lambda (value)
-			; If there are no remaining parameters to evaluate, then it's time
-			; to move to an application. We have 
-			(cond ((null? remaining-params)
-							; NOTE: function here is a function value from the
-							; interpreted scheme, so it is a compound of the
-							; form ('primitive <atom>).
-							(let ((params-evaled (append params-evaled (list value))))
-								(let ((function 
-												(get-func-from-params-evaled params-evaled))
-											(params 
-												(get-params-from-params-evaled params-evaled)))
-									(apply-func environment function params old-cont))))
-						 ; The value given is the value of the previous argument to
-						 ; be evaluated. There must be at least one, because there
-						 ; has to be at least the function, and I'm not currently
-						 ; giving any special treatment to evaluating the function.
-						 ; This routine of building new eval-op-cont with the same
-						 ; old-cont is a way of performing 'evlis' without building
-						 ; up any control context in the underlying scheme.
-						 (else (meaning environment 
-														(car remaining-params)
-														(eval-op-cont environment
+			(let ((params-evaled (append params-evaled (list value))))
+				; If there are no remaining parameters to evaluate, then it's
+				; time to do what needs to be done with the full list of
+				; evaluated parameters.
+				(cond ((null? remaining-params)
+							 (action environment params-evaled old-cont))
+								; The value given is the value of the previous argument to
+								; be evaluated. There must be at least one, because there
+								; has to be at least the function, and I'm not currently
+								; giving any special treatment to evaluating the function.
+								; This routine of building new eval-op-cont with the same
+								; old-cont is a way of performing 'evlis' without building
+								; up any control context in the underlying scheme.
+							 (else (meaning environment
+															(car remaining-params)
+															(evlis-cont environment
 																					(cdr remaining-params)
-																					(append params-evaled 
-																									(list value))
-																					old-cont)))))))
+																					params-evaled
+																					old-cont
+																					action))))))))
 
 ; I might need two separate continuation builders, but I didn't. All I
 ; needed was An argument evaluation continuation.
@@ -492,31 +632,6 @@
 ;		   that value to a new eval-op-cont whose job is to evaluate all the
 ;		   remaining parameters (if there are any), and then do the right
 ;		   thing with those.
-; I'm leaving the old idea here for now in this commit, and it will be
-; removed later. It might help in the future.
-;		- This will open up a new continuation, and within that
-;		   continuation, we'll have context extensions for each operand. So
-;		   if we're n levels deep at the start of function evaluation, then
-;		   we'll go to n+1 where we open up a continuation for the
-;		   evaluation of all the pieces of the application, and for each
-;		   evaluation, we'll go to n+2. Each return from n+2 yields the
-;		   meaning of an argument, and from there, we continue to process
-;		   the rest of the arguments.
-;		- To make it properly iterative, it's likely that we'll have to keep
-;		   bouncing between n and n+2. The n+1 will open up n+2, which will
-;		   return an argument, and n+1 will open up a new n+1 with the rest
-;		   of the arguments to go and figure out. So, n+1 will ask for the
-;		   meaning of the first argument in a list of remaining arguments to
-;		   go and figure out, then it will pass that meaning to a new n+1
-;		   which is given the current list of evaluated arguments, and the
-;		   list of arguments that will still be unevaluated by the time we
-;		   get to that continuation. If there are no remaining arguments to
-;		   consider, we return the arguments from an apply function. That
-;		   function will handle the details of whether or not the procedure
-;		   from the interpreter is primitive or not, and will then delegate
-;		   a new call to a specific type of application. Any of those
-;		   delegation functions should pass in the meaning of the
-;		   application to the continuation at level n.
 
 (define apply-func
 	(lambda (environment function params old-cont)
@@ -527,7 +642,9 @@
 					 (apply-nonprimitive environment function params old-cont))
 					((continuation? function)
 					 (apply-continuation environment function params old-cont))
-					(else (no-function-of-type)))))
+					(else 
+						(print-line "Hit error-value-not-function.")
+						(old-cont (error-value-not-function function))))))
 
 (define apply-primitive
 	(lambda (environment function params old-cont)
@@ -596,5 +713,55 @@
 		(print-line "Went to apply-continuation.") ;DEBUG
 		(let ((actual-cont (get-cont-val function)))
 			(actual-cont (first params)))))
+
+; For expressions of the form:
+;		(try try-func catch-func )
+;		(try try-func catch-func [finally-func]) ; Not yet!
+; Should create a new continuation that evaluates the try-func, and upon
+; receiving an error as a value, executes the catch-func.
+; try-func is a function of no arguments.
+; catch-func is a function of one argument, which is the error that may
+; be produced while running the try-func.
+(define *try
+	(lambda (environment expression continuation)
+		(print-line "Went to *try.")
+		(meaning environment 
+						 (second expression)
+						 (try-cont environment 
+											 (cddr expression)
+											 continuation))))
+
+; This can accept one more optional argument as a finally function.
+; Which is run after the try/catch functions are done running.
+(define try-cont
+	(lambda (environment remaining-params old-cont)
+		; A continuation which receives the meaning of the catch-func.
+		(define catch-cont
+			(lambda (environment catch-func continuation)
+				(print-line "Entered catch-cont.") ;DEBUG
+				(lambda (value)
+					(cond ((error? value)
+								 (apply-func environment
+														 catch-func
+														 (list value)
+														 continuation))
+								(else (continuation value))))))
+		; TODO: Include handling for an optional finally func here.
+		(define action
+			(lambda (environment params-evaled old-cont)
+				(print-line "Entered try-action.") ;DEBUG
+				(let ((try-func (first params-evaled))
+							(catch-func (second params-evaled)))
+					(apply-func environment 
+											try-func 
+											(list) ; try-func has no parameters
+											(catch-cont environment 
+																	catch-func
+																	old-cont)))))
+		(evlis-cont environment 
+								remaining-params 
+								(list)
+								old-cont
+								action)))
 
 ; }}} ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
