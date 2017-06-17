@@ -1,4 +1,4 @@
-A project to implement continuations and understand their uses.
+A personal project to implement continuations and understand their uses.
 
 `scheme-with-continuations.scm` implements an interpreter on top of R5RS
 scheme. The interpreter is written in a *Continuation Passing Style*.
