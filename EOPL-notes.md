@@ -15,14 +15,14 @@ continuation.
 It's likely that end-cont will return a function, or a thing to which a
 value can be applied. When we make the call:
 
-	(apply-cont (end-cont) val)
+  (apply-cont (end-cont) val)
 
 The first parameter is the continuation returned by calling end-cont,
 and apply-cont will apply `val` to the continuation returned by
 (end-cnt). When this happens, the following expressions will occur:
 
-	print some nice message.
-	Return the value
+  print some nice message.
+  Return the value
 
 When reading over value-of/k, we see that not every expression makes use
 of apply-cont, but it seems to stick to: the evaluation of operands
@@ -179,40 +179,40 @@ saw for rewriting complicated expressions in terms of continuations.
 You'd have to write them in terms of the chain of function calls that
 would occur.
 
-	(+ 1 (+ 2 (* 3 4)))
+  (+ 1 (+ 2 (* 3 4)))
 
 This would probably end up as:
 
 - See the `+`, start up a continuation for adding.
 - See the first actual parameter, set up a continuation that takes the
-	second actual parameter and adds them together.
+  second actual parameter and adds them together.
 - Going after the second actual parameter, you see another application.
-	You pretty much repeat the same process here, creating more
-	continuations to handle the operations, passing a single value at a
-	time backward. I think the chain would sorta be like:
+  You pretty much repeat the same process here, creating more
+  continuations to handle the operations, passing a single value at a
+  time backward. I think the chain would sorta be like:
 
 
-	Return a sum 
-	<- return the sum of 1 and second arg = (+ 2 (* 3 4)) 
-	<- return a sum
-	<- return the sum of 2 and second arg = (* 3 4)
-	<- return a product
-	<- return the product of 3 and second arg = 4
-	<- return a number, 4
+  Return a sum 
+  <- return the sum of 1 and second arg = (+ 2 (* 3 4)) 
+  <- return a sum
+  <- return the sum of 2 and second arg = (* 3 4)
+  <- return a product
+  <- return the product of 3 and second arg = 4
+  <- return a number, 4
 
 You evaluate this starting from the deepest level, which is:
 
 - Returning the value of 4.
 - Taking the product of 3 and 4 and returning that to the previous link.
-	The 3 was in there as part of the environment.
+  The 3 was in there as part of the environment.
 - Returning a value, the product from the continuation.
 - Take the sum of 2 (which was kept in the environment) and the value
-	returned from the product ( `(* 3 4)` = 12), which is 2 + 12 = 14.
-	Return that value to the previous link.
+  returned from the product ( `(* 3 4)` = 12), which is 2 + 12 = 14.
+  Return that value to the previous link.
 - Return the returned value to the previous link.
 - Return the sum of 1 (which was maintained in the environment of this
-	link) and the value given to this link, which was 14. The sum is 1 +
-	14 = 15.
+  link) and the value given to this link, which was 14. The sum is 1 +
+  14 = 15.
 - Return 15.
 
 Are environments bound to continuations? Probably, because the
@@ -232,14 +232,14 @@ I don't have the "cases" function, so the agreement that I will honor
 is:
 
 - The meaning function will not open up new frames for meanings, though
-	new frames may open up as a result of finding the right function to
-	handle the current expression. Either way, the number of frames that
-	will ever open up ought to be finite: the longest path through the
-	`expression-to-action` function to a resulting action function.
+  new frames may open up as a result of finding the right function to
+  handle the current expression. Either way, the number of frames that
+  will ever open up ought to be finite: the longest path through the
+  `expression-to-action` function to a resulting action function.
 - No action function should open up a new frame, except as a result of
-	looking up variable names. In this case, the number of frames that
-	shall be opened up will be finite: no longer than the number of ribs
-	in the rib-cage environment.
+  looking up variable names. In this case, the number of frames that
+  shall be opened up will be finite: no longer than the number of ribs
+  in the rib-cage environment.
 
 Since the meaning and action functions use a bounded amount of frames,
 they should be *iterative*.
@@ -251,27 +251,27 @@ only a finite amount of memory at any one time, however I was wrong on
 several points:
 
 - What matters is that the underlying scheme uses a bounded amount of
-	new continuation frames, not memory. The program could get arbitrarily
-	long, which would break the finite memory contract in a way that
-	doesn't make sense.
+  new continuation frames, not memory. The program could get arbitrarily
+  long, which would break the finite memory contract in a way that
+  doesn't make sense.
 - The lookup functions ultimately are iterative. There's no necessary
-	knowledge of anything that came before when we look through them. We
-	just have calls to lookup in an entry, each of which looks through
-	name/value pairs of the rib in an iterative manner. At the end of each
-	lookup in entry function, we call a callback to lookup in the ribcage
-	with that rib removed. This is, again, iterative, because the result
-	of the callback is the result of the function. There is no need for a
-	new continuation frame.
+  knowledge of anything that came before when we look through them. We
+  just have calls to lookup in an entry, each of which looks through
+  name/value pairs of the rib in an iterative manner. At the end of each
+  lookup in entry function, we call a callback to lookup in the ribcage
+  with that rib removed. This is, again, iterative, because the result
+  of the callback is the result of the function. There is no need for a
+  new continuation frame.
 - The sorts of calls that would build up continuation frames are things
-	like:
-	- The original `*application`, which evaluated a function, then
-		evaluated the list of arguments to the function, then passed those
-		to an `apply` function. The evaluations necessarily built control
-		context, and could've done so without bound, as each of the
-		expressions to evaluate could've been arbitrarily complicated with
-		subexpressions, and the evaluation of subexpressions required
-		extensions to the control context.
-	- `evlis`, which built a list of meanings from a list of arguments.
+  like:
+  - The original `*application`, which evaluated a function, then
+    evaluated the list of arguments to the function, then passed those
+    to an `apply` function. The evaluations necessarily built control
+    context, and could've done so without bound, as each of the
+    expressions to evaluate could've been arbitrarily complicated with
+    subexpressions, and the evaluation of subexpressions required
+    extensions to the control context.
+  - `evlis`, which built a list of meanings from a list of arguments.
 
 I think you end up adding continuation frames when you've got "more
 things to do". Basically, you add a frame when right now is a place that
@@ -317,10 +317,10 @@ and the continuation builder. The only things you'd want to do with
 continuations is:
 
 - Extend the control context by creating a new continuation out of the
-	current continuation, and packing any required information into the
-	new continuation by way of free variables.
+  current continuation, and packing any required information into the
+  new continuation by way of free variables.
 - Apply an argument to a continuation, causing your function to
-	"return".
+  "return".
 
 The continuations are essentially stacks. Passable stacks. Just as a
 stack keeps track of control context in C/C++, continuations do so too,
@@ -366,17 +366,17 @@ I also need to figure out the exact meaning of 'works'.
 
 - When passed well-formed expressions
 - Accepts some subset of the valid expressions of the underlying scheme?
-	(It's not all of it, but what happens if I decide to extend the
-	underlying scheme? That's a different proof in this situation)
+  (It's not all of it, but what happens if I decide to extend the
+  underlying scheme? That's a different proof in this situation)
 
 
 # Some of the Book Specific Functions for defining Languages:
 
 - **`cases`**
-	- Found on page 72
+  - Found on page 72
 - **`define-datatype`**
-	- Found on page 70
-	
+  - Found on page 70
+  
 # My understanding of continuations after implementing them
 
 They're not too much unlike a stack. I'd go as far as saying that a
@@ -399,7 +399,7 @@ expression:
 
 ~~~ {.scheme}
 (cond (#t 0)
-			(#f 1))
+      (#f 1))
 ~~~
 
 This is an expression that is built out of several subexpressions.
@@ -412,9 +412,9 @@ interpreter is built, you'd do something like:
 
 1. Take the first question and answer pair. Take the question from it.
 2. Evaluate the question, and upon getting the value back, check if the
-	 value was true.
+   value was true.
 3. If the value was true, then return the value of the answer.
-	 Otherwise, evaluate the rest of the question-answer pairs.
+   Otherwise, evaluate the rest of the question-answer pairs.
 
 Here, the underlying machine goes to call the meaning function first,
 while still in the function call that's evaluating the entire cond
@@ -429,23 +429,23 @@ this instead.
 
 1. Take the first question and answer pair. Take the question from it.
 2. Rather than making use of the underlying machine's control context to
-	 recursively evaluate the question, you create a new continuation:
-	 - I don't know what the value of the question is, but I know what to
-		 do when I do get the question's value: I should return the value of
-		 the answer if the question's value was true, and evaluate the rest
-		 of the cond otherwise (if there is anything left).
-	 - So, you create a function which does just that: you give it the
-		 answer, and the rest of the cond which might need to get evaluated,
-		 and it produces a new function which takes just one argument: the
-		 value of the question. 
-	 - You issue a recursive evaluation call on the question, just as you
-		 would have done before, but it is no longer properly recursive from
-		 the underlying machine's point of view. The meaning of the cond is
-		 whatever will come out of your new continuation, once the value of
-		 the question gets passed to it. So the underlying machine has
-		 nothing to remember: all of that information of what to do, and
-		 data that's needed to know what to do was placed in the
-		 continuation instead.
+   recursively evaluate the question, you create a new continuation:
+   - I don't know what the value of the question is, but I know what to
+     do when I do get the question's value: I should return the value of
+     the answer if the question's value was true, and evaluate the rest
+     of the cond otherwise (if there is anything left).
+   - So, you create a function which does just that: you give it the
+     answer, and the rest of the cond which might need to get evaluated,
+     and it produces a new function which takes just one argument: the
+     value of the question. 
+   - You issue a recursive evaluation call on the question, just as you
+     would have done before, but it is no longer properly recursive from
+     the underlying machine's point of view. The meaning of the cond is
+     whatever will come out of your new continuation, once the value of
+     the question gets passed to it. So the underlying machine has
+     nothing to remember: all of that information of what to do, and
+     data that's needed to know what to do was placed in the
+     continuation instead.
 
 There's one thing that I left out. It's more than likely that the cond
 statement was surrounded by other statements. Even if it wasn't, there
@@ -526,80 +526,80 @@ happened, then our program wouldn't end correctly. It would behave like
 this:
 
 - Save the control context in the underlying machine in a properly
-	recursive call to `meaning`.
+  recursive call to `meaning`.
 - Proceed with continuations through the rest of the program.
 - Finish evaluating the end continuation.
 - Then, after the program *should have ended*, return *nothing* to the
-	properly recursive function call to `meaning` from the 1st step.
+  properly recursive function call to `meaning` from the 1st step.
 
 New continuation not necessary:
 
 - primitive data: Evaluating these requires just one call to a defined
-	function in the underlying machine.
-	- numbers
-	- booleans
-	- primitive functions
+  function in the underlying machine.
+  - numbers
+  - booleans
+  - primitive functions
 - "expression-to-action": Not necessary, because we know that this will
-	return after a finite number of steps, all the time (with a
-	well-formed expression). It's not so much the case that we can't use
-	the control context of the underlying machine *at all*, but just never
-	for the use of evaluating an interpreter expression (calling the
-	`meaning` function).
+  return after a finite number of steps, all the time (with a
+  well-formed expression). It's not so much the case that we can't use
+  the control context of the underlying machine *at all*, but just never
+  for the use of evaluating an interpreter expression (calling the
+  `meaning` function).
 - `quote`: Not necessary, because the value of `(quote exp)` is `exp`,
-	which is a value that can be obtained without issuing recursive calls
-	to meaning, at all.
+  which is a value that can be obtained without issuing recursive calls
+  to meaning, at all.
 - `lambda`: Nothing in the lambda form has to be evaluated in order to
-	return a lambda. The return value of a lambda statement is just a
-	re-arrangement of all the information in the lambda statement, along
-	with the current environment from the interpreter.
+  return a lambda. The return value of a lambda statement is just a
+  re-arrangement of all the information in the lambda statement, along
+  with the current environment from the interpreter.
 
 New continuations necessary:
 
 - `cond`: To figure out the value of a cond statement, we have to figure
-	out the value of the question, *then* figure out the value of
-	something else. There is no way to do this in the underlying machine
-	without being properly recursive. The value from a call to the meaning
-	function is necessary in order to know what how to evaluate the cond.
-	Instead of doing this in the underlying machine, create a new function
-	which contains all of the necessary information for doing the next
-	thing:
-	- The rest of the unevaluated pieces of the cond (the other
-		question-answer pairs)
-	- The answer for the current question you have to evaluate
-	- Where to return the value of the cond (the current continuation).
+  out the value of the question, *then* figure out the value of
+  something else. There is no way to do this in the underlying machine
+  without being properly recursive. The value from a call to the meaning
+  function is necessary in order to know what how to evaluate the cond.
+  Instead of doing this in the underlying machine, create a new function
+  which contains all of the necessary information for doing the next
+  thing:
+  - The rest of the unevaluated pieces of the cond (the other
+    question-answer pairs)
+  - The answer for the current question you have to evaluate
+  - Where to return the value of the cond (the current continuation).
 
-	That function is a new continuation. It has *extended the control
-	context*.  Then, the last line in the function for evaluating cond is
-	just a call to meaning without anything surrounding it. You evaluate
-	the meaning of the question and pass that meaning into your new
-	continuation which will use that value to decide whether to return the
-	current answer, or evaluate the rest of the cond.
+  That function is a new continuation. It has *extended the control
+  context*.  Then, the last line in the function for evaluating cond is
+  just a call to meaning without anything surrounding it. You evaluate
+  the meaning of the question and pass that meaning into your new
+  continuation which will use that value to decide whether to return the
+  current answer, or evaluate the rest of the cond.
 - `if`: The same case as the cond statement. To find the value of the
-	if, you have to find the value of a question and an one of two
-	answers, which could not be done in the underlying machine alone
-	without a properly recursive call to `meaning`.
+  if, you have to find the value of a question and an one of two
+  answers, which could not be done in the underlying machine alone
+  without a properly recursive call to `meaning`.
 - `applications`: In order to find the value of an application, you have
-	to find the value of all the expressions in a list, then, since the
-	first element of the list should be a function, apply that function to
-	the rest of the list. That requires a properly recursive call, because
-	knowing the value of an applicaiton requires knowing the value of
-	*several* statements first, and then those values have to be combined
-	in some way. Thus, instead of trying to do this recursively in the
-	underying machine, we create a new continuation out of the current one
-	and pack all the information that's needed to figure out what to do
-	next after evaluating the first element of the list of elements in the
-	application:
-	- Give it the old continuation, so that it knows where to return.
-	- Give it all of the other elements from the list that it will have to
-		evaluate (if there are any)
-	- Give it any arguments that you've evaluated so far (if there are
-		any)
-	- Give it the current environment, in case it needs to find another
-		meaning from a thing in the application list (which it probably will).
+  to find the value of all the expressions in a list, then, since the
+  first element of the list should be a function, apply that function to
+  the rest of the list. That requires a properly recursive call, because
+  knowing the value of an applicaiton requires knowing the value of
+  *several* statements first, and then those values have to be combined
+  in some way. Thus, instead of trying to do this recursively in the
+  underying machine, we create a new continuation out of the current one
+  and pack all the information that's needed to figure out what to do
+  next after evaluating the first element of the list of elements in the
+  application:
+  - Give it the old continuation, so that it knows where to return.
+  - Give it all of the other elements from the list that it will have to
+    evaluate (if there are any)
+  - Give it any arguments that you've evaluated so far (if there are
+    any)
+  - Give it the current environment, in case it needs to find another
+    meaning from a thing in the application list (which it probably will).
 
-	You take the burden of remembering what to do when the underlying
-	machine gets the value of the current element of the application list
-	and pack all of that information into a new continuation instead.
+  You take the burden of remembering what to do when the underlying
+  machine gets the value of the current element of the application list
+  and pack all of that information into a new continuation instead.
 
 # Improved Understanding
 
@@ -633,15 +633,15 @@ whatever function is called.
 So we have something analogous here:
 
 - Agreed upon location to place a return value:
-	- C/C++/stack based compilers/interpreters: Some previously agreed
-		upon location on the stack, or an agreed upon register from the
-		processor.
-	- Continuation Based compilers/interpreters: The return value is
-		passed in as a parameter to a function which represents the control
-		context.
+  - C/C++/stack based compilers/interpreters: Some previously agreed
+    upon location on the stack, or an agreed upon register from the
+    processor.
+  - Continuation Based compilers/interpreters: The return value is
+    passed in as a parameter to a function which represents the control
+    context.
 - Information Stored in both:
-	- Parameter information
-	- Place to return to
+  - Parameter information
+  - Place to return to
 
 When information about control flow needs to be stored in a stack-based
 program, a new frame is created on a stack which includes a return
@@ -651,19 +651,19 @@ continuation-based program, a function is created that contains the
 following:
 
 - The current continuation, because when the current action is finished
-	running, it needs to return.
+  running, it needs to return.
 - Any information the current action would need to finish what it was
-	doing (any variable/parameter values).
+  doing (any variable/parameter values).
 - Information on what to do to produce the correct value once the action
-	of the "called function" would take place. There's *a lot* that's wrong
-	with this previous sentence, but I don't want to delve too far into
-	how continuations and stacks differ yet. The best way to think about
-	this: if, in a normal stack-based language, a function call would
-	return a value to the caller, and the caller would continue on with
-	that value, in a CPS style language, all of the instructions that
-	would come after the function call are moved into a new continuation,
-	along with any of the information those instructions would need to
-	run correctly.
+  of the "called function" would take place. There's *a lot* that's wrong
+  with this previous sentence, but I don't want to delve too far into
+  how continuations and stacks differ yet. The best way to think about
+  this: if, in a normal stack-based language, a function call would
+  return a value to the caller, and the caller would continue on with
+  that value, in a CPS style language, all of the instructions that
+  would come after the function call are moved into a new continuation,
+  along with any of the information those instructions would need to
+  run correctly.
 
 When In much the same way that a stack "unwinds" as values
 are returned to caling functions, one travels up a chain of
@@ -701,12 +701,12 @@ would just go wherever the value of the function call would go; the two
 values are one and the same.
 
 - The evaluation of operands cause the creation of new continuations,
-	not the evaluation of functions.
+  not the evaluation of functions.
 - The evaluation of tail call functions do *not* cause the creation of
-	new continuations, because no new control information is necessary.
-	The value of the tail call goes exactly where the value of the
-	function would go, because the value of the tail call is the value of
-	the function.
+  new continuations, because no new control information is necessary.
+  The value of the tail call goes exactly where the value of the
+  function would go, because the value of the tail call is the value of
+  the function.
 
 This is why that sentence that implied that continuations grow with
 function calls is very, very wrong. They only grow when evaluating an
@@ -736,9 +736,9 @@ is used often, it is just a front-end to meaning. The bulk of
 implementing the continuations is doing two things:
 
 - Altering the `meaning` function to take a continuation as an argument,
-	in addition to an environment and an expression to evaluate.
+  in addition to an environment and an expression to evaluate.
 - Taking any properly recursive call that the underlying Scheme would
-	make and expressing that call through continuations.
+  make and expressing that call through continuations.
 
 The first and second piece are really all part of the same goal. To give
 the interpreter itself complete control over its control context, you
@@ -760,10 +760,10 @@ do when your program finishes evaluating.
 
 ~~~ {.scheme}
 (define end-cont 
-	(lambda (value)
-		(display "The value of the expression was: ")
-		(print-line value)
-		(print-line '(End program))))
+  (lambda (value)
+    (display "The value of the expression was: ")
+    (print-line value)
+    (print-line '(End program))))
 ~~~
 
 ### When Continuations Grow
@@ -771,16 +771,16 @@ do when your program finishes evaluating.
 In my language I have several different general types of statements:
 
 - Primitive expressions, which are either just a primitive data type
-	(number/boolean), or a primitive function name.
+  (number/boolean), or a primitive function name.
 - Resolution of an identifier, for any name that is not the name of a
-	primitive function.
+  primitive function.
 - And some 'list forms':
-	- `(quote exp)`
-	- `(cond (q1 a1) ... (qn an))`
-	- `(if question if-true if-false)`
-	- `(lambda (param1, ..., paramn) body)`
-	- `(let ((name1 val1) ... (namen valn)) expression)`
-	- `(function-value arg1 ... argn)`
+  - `(quote exp)`
+  - `(cond (q1 a1) ... (qn an))`
+  - `(if question if-true if-false)`
+  - `(lambda (param1, ..., paramn) body)`
+  - `(let ((name1 val1) ... (namen valn)) expression)`
+  - `(function-value arg1 ... argn)`
 
 Primitive expressions, resolutions of identifiers, labmda expressions,
 and quote forms do not require the extension of control context.
@@ -803,7 +803,7 @@ context:
 
 - `(cond)`, which produces nothing.
 - `(cond (else exp))`, whose value is just the value of `exp`, and the
-	interpreter will see that.
+  interpreter will see that.
 
 All other forms of cond will require a continuation, because evaluating
 the `cond` staement means evaluating one of the questions, and then
@@ -812,46 +812,46 @@ recursive function call, and as such, information about this call needs
 to be stored in a continuation. This continuation requires:
 
 - All other question/answer pairs of the `cond`, just in case the value
-	of the first question is false.
+  of the first question is false.
 - The answer to evaluate in case the value of the first question is
-	true.
+  true.
 - The current environment, for evaluating the answer, or to pass to the
-	function that will evaluate the rest of the `cond`.
+  function that will evaluate the rest of the `cond`.
 - The current continuation, because once this new continuation finishes
-	it's job, it must produce a value to return, and it must return that
-	value wherever the value of the `cond` should have gone.
+  it's job, it must produce a value to return, and it must return that
+  value wherever the value of the `cond` should have gone.
 
 ~~~ {.scheme}
 ; The function which states what to do when a cond expression is to be
 ; evaluated.
 (define *cond
-	(lambda (environment expression continuation)
-		; Remove the 'cond'. Now we just have a list of questions and
-		; answer pairs.
-		(evcon environment (cdr expression) continuation)))
+  (lambda (environment expression continuation)
+    ; Remove the 'cond'. Now we just have a list of questions and
+    ; answer pairs.
+    (evcon environment (cdr expression) continuation)))
 
 ; The function which states *how* to evaluate a cond expression.
 (define evcon
-	(lambda (environment qa-list continuation)
-		(let ((question (caar qa-list)) (answer (cadar qa-list)))
-			(cond ((eq? 'else question)
-						 ;(print-line "Question was 'else.") ;DEBUG
-						 (meaning environment answer continuation))
-						(else
-							(meaning environment 
-											 question 
-											 (cond-cont environment 
-																	answer 
-																	(cdr qa-list) 
-																	continuation)))))))
+  (lambda (environment qa-list continuation)
+    (let ((question (caar qa-list)) (answer (cadar qa-list)))
+      (cond ((eq? 'else question)
+             ;(print-line "Question was 'else.") ;DEBUG
+             (meaning environment answer continuation))
+            (else
+              (meaning environment 
+                       question 
+                       (cond-cont environment 
+                                  answer 
+                                  (cdr qa-list) 
+                                  continuation)))))))
 
 ; The function for creating new continuations for cond expressions.
 (define cond-cont
-	(lambda (environment answer rest-of-cond old-cont)
-		(lambda (value)
-			(if value
-				(meaning environment answer old-cont)
-				(evcon environment rest-of-cond old-cont)))))
+  (lambda (environment answer rest-of-cond old-cont)
+    (lambda (value)
+      (if value
+        (meaning environment answer old-cont)
+        (evcon environment rest-of-cond old-cont)))))
 ~~~
 
 ### applications
@@ -873,71 +873,71 @@ function for each. In order to continue evaluating the function, the
 following information is necessary to give to the continuation:
 
 - The value of all the expressions of the application left to evaluate
-	(if there are none, then a value is passed which indicates that; in my
-	implementation, it's the empty list).
+  (if there are none, then a value is passed which indicates that; in my
+  implementation, it's the empty list).
 - The value of all the expressions that have been evaluated so far, if
-	there are any. If there are none, then a value is passed which
-	indicates that; In my implementation, that is the empty list. This
-	part is necessary because these continuations for function evaluation
-	essentially collect a list of the evaluated expressions until all of
-	the expressions have been evaluated. The process is done through
-	continuations so that there's no properly recursive function call in
-	the underlying Scheme.
+  there are any. If there are none, then a value is passed which
+  indicates that; In my implementation, that is the empty list. This
+  part is necessary because these continuations for function evaluation
+  essentially collect a list of the evaluated expressions until all of
+  the expressions have been evaluated. The process is done through
+  continuations so that there's no properly recursive function call in
+  the underlying Scheme.
 - The current continuation, because if the application is to be
-	evaluated, it must return its value to the current continuation.
+  evaluated, it must return its value to the current continuation.
 - The current environment, for evaluating expressions.
 
 ~~~ {.scheme}
 (define *application
-	(lambda (environment expression continuation)
-		(print-line "Went to application.") ;DEBUG
-		(meaning environment 
-						 (car expression) ; The function of the application.
-						 (eval-op-cont environment 
-													 (cdr expression) 
-													 (list) 
-													 continuation))))
+  (lambda (environment expression continuation)
+    (print-line "Went to application.") ;DEBUG
+    (meaning environment 
+             (car expression) ; The function of the application.
+             (eval-op-cont environment 
+                           (cdr expression) 
+                           (list) 
+                           continuation))))
 
 (define eval-op-cont
-	(lambda (environment remaining-params params-evaled old-cont)
-		(lambda (value)
-			; If there are no remaining parameters to evaluate, then it's time
-			; to move to an application. We have 
-			(cond ((null? remaining-params)
-							; NOTE: function here is a function value from the
-							; interpreted scheme, so it is a compound of the
-							; form ('primitive <atom>).
-							(let ((params-evaled (append params-evaled (list value))))
-								(let ((function 
-												(get-func-from-params-evaled params-evaled))
-											(params 
-												(get-params-from-params-evaled params-evaled)))
-									(apply-func environment function params old-cont))))
-						 ; The value given is the value of the previous argument to
-						 ; be evaluated. There must be at least one, because there
-						 ; has to be at least the function, and I'm not currently
-						 ; giving any special treatment to evaluating the function.
-						 ; This routine of building new eval-op-cont with the same
-						 ; old-cont is a way of performing 'evlis' without building
-						 ; up any control context in the underlying scheme.
-						 (else (meaning environment 
-														(car remaining-params)
-														(eval-op-cont environment
-																					(cdr remaining-params)
-																					(append params-evaled 
-																									(list value))
-																					old-cont)))))))
+  (lambda (environment remaining-params params-evaled old-cont)
+    (lambda (value)
+      ; If there are no remaining parameters to evaluate, then it's time
+      ; to move to an application. We have 
+      (cond ((null? remaining-params)
+              ; NOTE: function here is a function value from the
+              ; interpreted scheme, so it is a compound of the
+              ; form ('primitive <atom>).
+              (let ((params-evaled (append params-evaled (list value))))
+                (let ((function 
+                        (get-func-from-params-evaled params-evaled))
+                      (params 
+                        (get-params-from-params-evaled params-evaled)))
+                  (apply-func environment function params old-cont))))
+             ; The value given is the value of the previous argument to
+             ; be evaluated. There must be at least one, because there
+             ; has to be at least the function, and I'm not currently
+             ; giving any special treatment to evaluating the function.
+             ; This routine of building new eval-op-cont with the same
+             ; old-cont is a way of performing 'evlis' without building
+             ; up any control context in the underlying scheme.
+             (else (meaning environment 
+                            (car remaining-params)
+                            (eval-op-cont environment
+                                          (cdr remaining-params)
+                                          (append params-evaled 
+                                                  (list value))
+                                          old-cont)))))))
 
 (define apply-func
-	(lambda (environment function params old-cont)
-		(print-line "Went to apply-func.") ;DEBUG
-		(cond ((primitive? function) 
-					 (apply-primitive environment function params old-cont))
-					((non-primitive? function) 
-					 (apply-nonprimitive environment function params old-cont))
-					((continuation? function)
-					 (apply-continuation environment function params old-cont))
-					(else (no-function-of-type)))))
+  (lambda (environment function params old-cont)
+    (print-line "Went to apply-func.") ;DEBUG
+    (cond ((primitive? function) 
+           (apply-primitive environment function params old-cont))
+          ((non-primitive? function) 
+           (apply-nonprimitive environment function params old-cont))
+          ((continuation? function)
+           (apply-continuation environment function params old-cont))
+          (else (no-function-of-type)))))
 ~~~
 
 The actual implementations of `apply-primitive`, `apply-nonprimitive`,
